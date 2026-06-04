@@ -23,6 +23,11 @@ class BybitExchange(BaseExchange):
     
     async def start_websocket_listener(self, symbols: List[str]):
         """Запуск WebSocket слушателя с автоматическим реконнектом"""
+        # 🔒 Жесткая блокировка повторного запуска
+        if hasattr(self, '_is_listening') and self._is_listening:
+            return
+        self._is_listening = True
+        
         self.ws_running = True
         
         # Для Bybit нужна aiohttp сессия
@@ -46,12 +51,21 @@ class BybitExchange(BaseExchange):
                 await self.connect_ws()
                 await self.subscribe_orderbook(symbols)
                 
-                # Бесконечный цикл получения сообщений
-                async for msg in self.ws:
-                    if msg.type == aiohttp.WSMsgType.TEXT:
-                        data = json.loads(msg.data)
-                        await self._handle_message(data)
-                    elif msg.type == aiohttp.WSMsgType.ERROR:
+                # 🔧 FIX: Явный receive() вместо async for для предотвращения race condition
+                while self.ws_running and self.ws:
+                    try:
+                        msg = await self.ws.receive()
+                        if msg.type == aiohttp.WSMsgType.TEXT:
+                            data = json.loads(msg.data)
+                            await self._handle_message(data)
+                        elif msg.type == aiohttp.WSMsgType.CLOSED:
+                            print("⚠️ Bybit WS connection closed, reconnecting...")
+                            break
+                        elif msg.type == aiohttp.WSMsgType.ERROR:
+                            print("⚠️ Bybit WS error, reconnecting...")
+                            break
+                    except Exception as e:
+                        print(f"⚠️ Bybit receive error: {e}")
                         break
                         
             except Exception as e:
@@ -68,10 +82,54 @@ class BybitExchange(BaseExchange):
         if self.ws:
             await self.ws.close()
     
+    def _normalize_symbol(self, symbol: str) -> str:
+        """Нормализация символа к виду BTC/USDT"""
+        # Bybit использует 'BTCUSDT' -> 'BTC/USDT'
+        if "USDT" in symbol and "/" not in symbol:
+            return symbol.replace("USDT", "/USDT")
+        return symbol
+    
+    def _exchange_format_symbol(self, symbol: str) -> str:
+        """Конвертация BTC/USDT в формат биржи BTCUSDT"""
+        return symbol.replace("/", "")
+    
     async def _handle_message(self, data: dict):
         """Обработка входящего сообщения"""
-        # Простая обработка для теста
-        pass
+        print(f"🔍 BYBIT RAW MESSAGE: {data}")  # Отладка входящих сообщений
+        try:
+            # Пропускаем служебные сообщения
+            if data.get("op") in ["pong", "subscribe"]:
+                return
+            
+            topic = data.get("topic", "")
+            
+            # Orderbook data
+            if topic.startswith("orderbook"):
+                result = data.get("data", {})
+                sym = result.get("s")
+                bids = result.get("b", [])
+                asks = result.get("a", [])
+                
+                if sym and bids and asks:
+                    symbol = self._normalize_symbol(sym)
+                    self.orderbooks[symbol] = {
+                        "bid": float(bids[0][0]),
+                        "ask": float(asks[0][0])
+                    }
+                    print(f"✅ BYBIT orderbook saved: {symbol}")
+            
+            # Funding rate from tickers
+            elif topic.startswith("tickers"):
+                result = data.get("data", {})
+                sym = result.get("symbol")
+                funding_rate = result.get("fundingRate")
+                
+                if sym and funding_rate is not None:
+                    symbol = self._normalize_symbol(sym)
+                    self.funding_rates[symbol] = float(funding_rate)
+                    print(f"✅ BYBIT funding rate saved: {symbol}")
+        except Exception as e:
+            print(f"⚠️ Bybit message parse error: {e}")
         
     async def connect_ws(self):
         """Connect to WebSocket"""
@@ -107,70 +165,47 @@ class BybitExchange(BaseExchange):
     async def subscribe_orderbook(self, symbols: List[str]):
         """Subscribe to orderbook updates"""
         for symbol in symbols:
+            exchange_symbol = self._exchange_format_symbol(symbol)
             await self.ws.send_json({
                 "op": "subscribe",
-                "args": [f"orderbook.50.{symbol}"]
+                "args": [f"orderbook.50.{exchange_symbol}"]
             })
     
     async def subscribe_funding_rate(self, symbols: List[str]):
         """Subscribe to funding rate updates"""
         for symbol in symbols:
+            exchange_symbol = self._exchange_format_symbol(symbol)
             await self.ws.send_json({
                 "op": "subscribe",
-                "args": [f"tickers.{symbol}"]
+                "args": [f"tickers.{exchange_symbol}"]
             })
     
-    async def get_market_data(self, symbol: str) -> MarketData:
-        """Get market data from WebSocket stream"""
-        while True:
-            try:
-                msg = await self.ws.receive()
-                if msg.type == aiohttp.WSMsgType.TEXT:
-                    data = json.loads(msg.data)
-                    
-                    # Skip system messages
-                    if data.get("op") in ["pong", "subscribe"]:
-                        continue
-                    
-                    topic = data.get("topic", "")
-                    
-                    # Orderbook data
-                    if topic.startswith("orderbook"):
-                        result = data.get("data", {})
-                        sym = result.get("s")
-                        bids = result.get("b", [])
-                        asks = result.get("a", [])
-                        
-                        if sym and bids and asks:
-                            self.orderbooks[sym] = {
-                                "bid": float(bids[0][0]),
-                                "ask": float(asks[0][0])
-                            }
-                    
-                    # Funding rate from tickers
-                    elif topic.startswith("tickers"):
-                        result = data.get("data", {})
-                        sym = result.get("symbol")
-                        funding_rate = result.get("fundingRate")
-                        
-                        if sym and funding_rate is not None:
-                            self.funding_rates[sym] = float(funding_rate)
-                    
-                    # Return data if we have both
-                    for sym in list(self.orderbooks.keys()):
-                        if sym in self.funding_rates:
-                            return MarketData(
-                                exchange=self.name,
-                                symbol=sym,
-                                bid=self.orderbooks[sym]["bid"],
-                                ask=self.orderbooks[sym]["ask"],
-                                funding_rate=self.funding_rates[sym],
-                                timestamp=datetime.now()
-                            )
-                            
-            except Exception as e:
-                print(f"Bybit WS error: {e}")
-                await asyncio.sleep(1)
+    async def get_market_data(self, symbol: str = None) -> MarketData:
+        """Получение рыночных данных из локального хранилища"""
+        # Если symbol не указан, возвращаем любые доступные данные
+        if symbol is None:
+            for sym in self.orderbooks.keys():
+                return MarketData(
+                    exchange=self.name,
+                    symbol=sym,
+                    bid=self.orderbooks[sym]["bid"],
+                    ask=self.orderbooks[sym]["ask"],
+                    funding_rate=self.funding_rates.get(sym, 0.0),
+                    timestamp=datetime.now()
+                )
+            return None
+        
+        # Просто читаем готовые данные для конкретного символа
+        if symbol in self.orderbooks:
+            return MarketData(
+                exchange=self.name,
+                symbol=symbol,
+                bid=self.orderbooks[symbol]["bid"],
+                ask=self.orderbooks[symbol]["ask"],
+                funding_rate=self.funding_rates.get(symbol, 0.0),
+                timestamp=datetime.now()
+            )
+        return None
     
     async def place_order(self, symbol: str, side: str, size: float, order_type: str = 'market'):
         """Открытие позиции"""

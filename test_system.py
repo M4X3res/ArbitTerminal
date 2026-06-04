@@ -1,4 +1,4 @@
-ns"""
+"""
 Комплексный тест фьючерсных коннекторов
 Проверка: WebSocket, Funding Rate, Market Data streaming
 """

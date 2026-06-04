@@ -27,6 +27,11 @@ class MEXCExchange(BaseExchange):
     
     async def start_websocket_listener(self, symbols: List[str]):
         """Запуск WebSocket слушателя с автоматическим реконнектом"""
+        # 🔒 Жесткая блокировка повторного запуска
+        if hasattr(self, '_is_listening') and self._is_listening:
+            return
+        self._is_listening = True
+        
         self.ws_running = True
         
         while self.ws_running:
@@ -42,10 +47,15 @@ class MEXCExchange(BaseExchange):
                 await self.connect_ws()
                 await self.subscribe_orderbook(symbols)
                 
-                # Бесконечный цикл получения сообщений
-                async for message in self.ws:
-                    data = json.loads(message)
-                    await self._handle_message(data)
+                # 🔧 FIX: Явный recv() вместо async for для предотвращения race condition
+                while self.ws_running and self.ws:
+                    try:
+                        message = await self.ws.recv()
+                        data = json.loads(message)
+                        await self._handle_message(data)
+                    except websockets.exceptions.ConnectionClosed:
+                        print("⚠️ MEXC WS connection closed, reconnecting...")
+                        break
                     
             except Exception as e:
                 print(f"❌ MEXC WebSocket error: {e}, reconnecting...")
@@ -57,10 +67,38 @@ class MEXCExchange(BaseExchange):
         if self.ws:
             await self.ws.close()
     
+    def _normalize_symbol(self, symbol: str) -> str:
+        """Нормализация символа к виду BTC/USDT"""
+        return symbol.replace("_", "/")
+    
+    def _exchange_format_symbol(self, symbol: str) -> str:
+        """Конвертация BTC/USDT в формат биржи BTC_USDT"""
+        return symbol.replace("/", "_")
+    
     async def _handle_message(self, data: dict):
         """Обработка входящего сообщения"""
-        # Простая обработка для теста
-        pass
+        print(f"🔍 MEXC RAW MESSAGE: {data}")  # Отладка входящих сообщений
+        try:
+            # Обработка depth
+            if data.get("channel") == "push.depth":
+                symbol = self._normalize_symbol(data["symbol"])
+                asks = data["data"]["asks"]
+                bids = data["data"]["bids"]
+                
+                if asks and bids:
+                    self.orderbooks[symbol] = {
+                        "bid": float(bids[0][0]),
+                        "ask": float(asks[0][0])
+                    }
+                    print(f"✅ MEXC orderbook saved: {symbol}")
+            
+            # Обработка funding rate
+            elif data.get("channel") == "push.funding.rate":
+                symbol = self._normalize_symbol(data["symbol"])
+                self.funding_rates[symbol] = float(data["data"]["rate"])
+                print(f"✅ MEXC funding rate saved: {symbol}")
+        except Exception as e:
+            print(f"⚠️ MEXC message parse error: {e}")
     
     async def connect_ws(self):
         """Подключение к WebSocket"""
@@ -70,16 +108,17 @@ class MEXCExchange(BaseExchange):
     async def subscribe_orderbook(self, symbols: List[str]):
         """Подписка на orderbook для списка символов"""
         for symbol in symbols:
+            exchange_symbol = self._exchange_format_symbol(symbol)
             # Подписка на depth
             await self.ws.send(json.dumps({
                 "method": "sub.depth",
-                "param": {"symbol": symbol}
+                "param": {"symbol": exchange_symbol}
             }))
             
             # Подписка на funding rate
             await self.ws.send(json.dumps({
                 "method": "sub.funding.rate",
-                "param": {"symbol": symbol}
+                "param": {"symbol": exchange_symbol}
             }))
         
         print(f"✅ MEXC subscribed to {len(symbols)} symbols")
@@ -88,44 +127,32 @@ class MEXCExchange(BaseExchange):
         """Подписка на funding rate (уже включена в subscribe_orderbook)"""
         pass  # Funding rate подписка происходит в subscribe_orderbook
     
-    async def get_market_data(self, symbol: str) -> MarketData:
-        """Получение рыночных данных из WebSocket потока"""
-        while True:
-            try:
-                message = await self.ws.recv()
-                data = json.loads(message)
-                
-                # Обработка depth
-                if data.get("channel") == "push.depth":
-                    symbol = data["symbol"]
-                    asks = data["data"]["asks"]
-                    bids = data["data"]["bids"]
-                    
-                    if asks and bids:
-                        self.orderbooks[symbol] = {
-                            "bid": float(bids[0][0]),  # Лучшая цена покупки
-                            "ask": float(asks[0][0])   # Лучшая цена продажи
-                        }
-                
-                # Обработка funding rate
-                elif data.get("channel") == "push.funding.rate":
-                    symbol = data["symbol"]
-                    self.funding_rates[symbol] = float(data["data"]["rate"])
-                
-                # Возврат полных данных если доступны
-                if symbol in self.orderbooks and symbol in self.funding_rates:
-                    return MarketData(
-                        exchange=self.name,
-                        symbol=symbol,
-                        bid=self.orderbooks[symbol]["bid"],
-                        ask=self.orderbooks[symbol]["ask"],
-                        funding_rate=self.funding_rates[symbol],
-                        timestamp=datetime.now()
-                    )
-                    
-            except Exception as e:
-                print(f"MEXC WS error: {e}")
-                await asyncio.sleep(1)
+    async def get_market_data(self, symbol: str = None) -> MarketData:
+        """Получение рыночных данных из локального хранилища"""
+        # Если symbol не указан, возвращаем любые доступные данные
+        if symbol is None:
+            for sym in self.orderbooks.keys():
+                return MarketData(
+                    exchange=self.name,
+                    symbol=sym,
+                    bid=self.orderbooks[sym]["bid"],
+                    ask=self.orderbooks[sym]["ask"],
+                    funding_rate=self.funding_rates.get(sym, 0.0),
+                    timestamp=datetime.now()
+                )
+            return None
+        
+        # Просто читаем готовые данные для конкретного символа
+        if symbol in self.orderbooks:
+            return MarketData(
+                exchange=self.name,
+                symbol=symbol,
+                bid=self.orderbooks[symbol]["bid"],
+                ask=self.orderbooks[symbol]["ask"],
+                funding_rate=self.funding_rates.get(symbol, 0.0),
+                timestamp=datetime.now()
+            )
+        return None
     
     async def get_instruments(self) -> List[str]:
         """Получение списка торговых инструментов"""

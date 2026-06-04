@@ -117,47 +117,36 @@ class MarketDataEngine:
             print(f"   ✗ {name}: ошибка подписки - {e}")
     
     async def _listen_exchange(self, name: str, exchange):
-        """Непрерывное прослушивание данных с биржи"""
-        reconnect_delay = 1
-        max_reconnect_delay = 60
-        
+        """Непрерывное чтение накопленных данных с биржи"""
         while True:
             try:
-                data = await asyncio.wait_for(
-                    exchange.get_market_data(None),
-                    timeout=30  # Timeout для обнаружения зависших соединений
-                )
+                await asyncio.sleep(0.1)  # Опрос каждые 100ms
                 
-                normalized = data.symbol.replace("-", "").replace("_", "").upper()
-                self.market_data[name][normalized] = data
-                
-                # Отправляем в очередь для обработки
-                try:
-                    self.data_queue.put_nowait(data)
-                except asyncio.QueueFull:
-                    pass
-                
-                # Уведомляем слушателей
-                for listener in self.listeners:
-                    asyncio.create_task(listener(data))
-                
-                # Сброс задержки при успешном получении данных
-                reconnect_delay = 1
+                # Читаем все доступные символы из локального хранилища
+                for symbol in list(exchange.orderbooks.keys()):
+                    if symbol in exchange.funding_rates:
+                        # Получаем готовые данные
+                        data = await exchange.get_market_data(symbol)
+                        
+                        if data is None:
+                            continue
+                        
+                        normalized = data.symbol.replace("-", "").replace("_", "").replace("/", "").upper()
+                        self.market_data[name][normalized] = data
+                        
+                        # Отправляем в очередь для обработки
+                        try:
+                            self.data_queue.put_nowait(data)
+                        except asyncio.QueueFull:
+                            pass
+                        
+                        # Уведомляем слушателей
+                        for listener in self.listeners:
+                            asyncio.create_task(listener(data))
                     
-            except asyncio.TimeoutError:
-                # Переподключение при timeout
-                print(f"   ⚠️  {name}: timeout, переподключение...")
-                try:
-                    await exchange.connect_ws()
-                except:
-                    pass
-                await asyncio.sleep(reconnect_delay)
-                reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
-                
             except Exception as e:
-                # Подавляем повторяющиеся ошибки 1005
-                if "1005" not in str(e) or reconnect_delay == 1:
-                    print(f"   ⚠️  {name}: {e}")
+                print(f"   ⚠️  {name}: {e}")
+                await asyncio.sleep(1)
                 
                 # Автоматическое переподключение
                 try:

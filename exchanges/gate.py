@@ -29,6 +29,11 @@ class GateExchange(BaseExchange):
     
     async def start_websocket_listener(self, symbols: List[str]):
         """Запуск WebSocket слушателя с автоматическим реконнектом"""
+        # 🔒 Жесткая блокировка повторного запуска
+        if hasattr(self, '_is_listening') and self._is_listening:
+            return
+        self._is_listening = True
+        
         self.ws_running = True
         
         while self.ws_running:
@@ -48,10 +53,15 @@ class GateExchange(BaseExchange):
                 await self.connect_ws()
                 await self.subscribe_orderbook(symbols)
                 
-                # Бесконечный цикл получения сообщений
-                async for message in self.ws:
-                    data = json.loads(message)
-                    await self._handle_message(data)
+                # 🔧 FIX: Явный recv() вместо async for для предотвращения race condition
+                while self.ws_running and self.ws:
+                    try:
+                        message = await self.ws.recv()
+                        data = json.loads(message)
+                        await self._handle_message(data)
+                    except websockets.exceptions.ConnectionClosed:
+                        print("⚠️ Gate.io WS connection closed, reconnecting...")
+                        break
                     
             except Exception as e:
                 print(f"❌ Gate.io WebSocket error: {e}, reconnecting...")
@@ -67,10 +77,52 @@ class GateExchange(BaseExchange):
         if self.ws:
             await self.ws.close()
     
+    def _normalize_symbol(self, symbol: str) -> str:
+        """Нормализация символа к виду BTC/USDT"""
+        return symbol.replace("_", "/")
+    
+    def _exchange_format_symbol(self, symbol: str) -> str:
+        """Конвертация BTC/USDT в формат биржи BTC_USDT"""
+        return symbol.replace("/", "_")
+    
     async def _handle_message(self, data: dict):
         """Обработка входящего сообщения"""
-        # Простая обработка для теста
-        pass
+        print(f"🔍 GATE RAW MESSAGE: {data}")  # Отладка входящих сообщений
+        try:
+            channel = data.get("channel")
+            event = data.get("event")
+            
+            # Пропускаем служебные сообщения
+            if event in ["subscribe", "pong"]:
+                return
+            
+            # Обработка order_book (событие "all" или "update")
+            if channel == "futures.order_book" and event in ["all", "update"]:
+                result = data.get("result", {})
+                contract = result.get("contract")
+                asks = result.get("asks", [])
+                bids = result.get("bids", [])
+                
+                if contract and asks and bids:
+                    symbol = self._normalize_symbol(contract)
+                    self.orderbooks[symbol] = {
+                        "bid": float(bids[0]["p"]),
+                        "ask": float(asks[0]["p"])
+                    }
+                    print(f"✅ GATE orderbook saved: {symbol}")
+            
+            # Обработка tickers
+            elif channel == "futures.tickers" and event == "update":
+                for ticker in data.get("result", []):
+                    contract = ticker.get("contract")
+                    funding_rate = ticker.get("funding_rate")
+                    
+                    if contract and funding_rate is not None:
+                        symbol = self._normalize_symbol(contract)
+                        self.funding_rates[symbol] = float(funding_rate)
+                        print(f"✅ GATE funding rate saved: {symbol}")
+        except Exception as e:
+            print(f"⚠️ Gate.io message parse error: {e}")
     
     async def connect_ws(self):
         """Подключение к WebSocket"""
@@ -92,12 +144,13 @@ class GateExchange(BaseExchange):
     async def subscribe_orderbook(self, symbols: List[str]):
         """Подписка на orderbook для списка символов"""
         for symbol in symbols:
+            exchange_symbol = self._exchange_format_symbol(symbol)
             # Подписка на order_book
             await self.ws.send(json.dumps({
                 "time": int(time.time()),
                 "channel": "futures.order_book",
                 "event": "subscribe",
-                "payload": [symbol, "20", "0"]
+                "payload": [exchange_symbol, "20", "0"]
             }))
             
             # Подписка на tickers (funding rate)
@@ -105,7 +158,7 @@ class GateExchange(BaseExchange):
                 "time": int(time.time()),
                 "channel": "futures.tickers",
                 "event": "subscribe",
-                "payload": [symbol]
+                "payload": [exchange_symbol]
             }))
         
         print(f"✅ Gate.io subscribed to {len(symbols)} symbols")
@@ -114,57 +167,32 @@ class GateExchange(BaseExchange):
         """Подписка на funding rate (уже включена в subscribe_orderbook)"""
         pass  # Funding rate подписка происходит через futures.tickers в subscribe_orderbook
     
-    async def get_market_data(self, symbol: str) -> MarketData:
-        """Получение рыночных данных из WebSocket потока"""
-        while True:
-            try:
-                message = await self.ws.recv()
-                data = json.loads(message)
-                
-                channel = data.get("channel")
-                event = data.get("event")
-                
-                # Пропускаем служебные сообщения
-                if event in ["subscribe", "pong"]:
-                    continue
-                
-                # Обработка order_book (событие "all" или "update")
-                if channel == "futures.order_book" and event in ["all", "update"]:
-                    result = data.get("result", {})
-                    contract = result.get("contract")
-                    asks = result.get("asks", [])
-                    bids = result.get("bids", [])
-                    
-                    if contract and asks and bids:
-                        self.orderbooks[contract] = {
-                            "bid": float(bids[0]["p"]),
-                            "ask": float(asks[0]["p"])
-                        }
-                
-                # Обработка tickers
-                elif channel == "futures.tickers" and event == "update":
-                    for ticker in data.get("result", []):
-                        contract = ticker.get("contract")
-                        funding_rate = ticker.get("funding_rate")
-                        
-                        if contract and funding_rate is not None:
-                            self.funding_rates[contract] = float(funding_rate)
-                
-                # Возврат данных если доступны
-                for contract in list(self.orderbooks.keys()):
-                    if contract in self.funding_rates:
-                        return MarketData(
-                            exchange=self.name,
-                            symbol=contract,
-                            bid=self.orderbooks[contract]["bid"],
-                            ask=self.orderbooks[contract]["ask"],
-                            funding_rate=self.funding_rates[contract],
-                            timestamp=datetime.now()
-                        )
-                    
-            except Exception as e:
-                print(f"Gate.io WS error: {e}")
-                await asyncio.sleep(1)
+    async def get_market_data(self, symbol: str = None) -> MarketData:
+        """Получение рыночных данных из локального хранилища"""
+        # Если symbol не указан, возвращаем любые доступные данные
+        if symbol is None:
+            for sym in self.orderbooks.keys():
+                return MarketData(
+                    exchange=self.name,
+                    symbol=sym,
+                    bid=self.orderbooks[sym]["bid"],
+                    ask=self.orderbooks[sym]["ask"],
+                    funding_rate=self.funding_rates.get(sym, 0.0),
+                    timestamp=datetime.now()
+                )
+            return None
+        
+        # Просто читаем готовые данные для конкретного символа
+        if symbol in self.orderbooks:
+            return MarketData(
+                exchange=self.name,
+                symbol=symbol,
+                bid=self.orderbooks[symbol]["bid"],
+                ask=self.orderbooks[symbol]["ask"],
+                funding_rate=self.funding_rates.get(symbol, 0.0),
+                timestamp=datetime.now()
+            )
+        return None
     
     async def get_instruments(self) -> List[str]:
         """Получение списка торговых инструментов"""
