@@ -3,6 +3,8 @@ from typing import List, Dict
 from models import MarketData, ArbitragePair
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
+from collections import deque
+import threading
 
 
 class ArbitrageEngine:
@@ -12,9 +14,10 @@ class ArbitrageEngine:
         self.spread_history = []
         self.stats = {
             "total_opportunities": 0,
-            "spreads": []
+            "spreads": deque(maxlen=10000)  # Ограничение 10k последних спредов
         }
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
+        self.stats_lock = threading.Lock()  # Защита от race condition
     
     def calculate_effective_spread(self, long_data: MarketData, short_data: MarketData) -> float:
         """Расчёт эффективного спреда с учётом funding rate"""
@@ -22,10 +25,11 @@ class ArbitrageEngine:
         raw_spread = (short_data.bid - long_data.ask) / long_data.ask * 100
         
         # Разница funding rates (платим на шорт, получаем на лонг)
-        funding_diff = short_data.funding_rate - long_data.funding_rate
+        # Funding rate уже в формате 0.0001 = 0.01%, умножаем на 100 для перевода в %
+        funding_diff = (short_data.funding_rate - long_data.funding_rate) * 100
         
-        # Эффективный спред
-        effective = raw_spread - funding_diff * 100
+        # Эффективный спред (funding начисляется раз в 8 часов, для коротких позиций не учитываем)
+        effective = raw_spread - funding_diff
         
         return effective
     
@@ -45,7 +49,8 @@ class ArbitrageEngine:
                     timestamp=datetime.now()
                 )
                 opportunities.append(opp)
-                self.stats["spreads"].append(spread1)
+                with self.stats_lock:
+                    self.stats["spreads"].append(spread1)
             
             # Стратегия 2
             spread2 = self.calculate_effective_spread(data_short, data_long)
@@ -58,7 +63,8 @@ class ArbitrageEngine:
                     timestamp=datetime.now()
                 )
                 opportunities.append(opp)
-                self.stats["spreads"].append(spread2)
+                with self.stats_lock:
+                    self.stats["spreads"].append(spread2)
         
         return opportunities
     
@@ -131,8 +137,9 @@ class ArbitrageEngine:
                     timestamp=datetime.now()
                 )
                 opportunities.append(opp)
-                self.stats["total_opportunities"] += 1
-                self.stats["spreads"].append(spread1)
+                with self.stats_lock:
+                    self.stats["total_opportunities"] += 1
+                    self.stats["spreads"].append(spread1)
             
             # Стратегия 2: LONG на ex_short, SHORT на ex_long
             spread2 = self.calculate_effective_spread(data_short, data_long)
@@ -149,8 +156,9 @@ class ArbitrageEngine:
                     timestamp=datetime.now()
                 )
                 opportunities.append(opp)
-                self.stats["total_opportunities"] += 1
-                self.stats["spreads"].append(spread2)
+                with self.stats_lock:
+                    self.stats["total_opportunities"] += 1
+                    self.stats["spreads"].append(spread2)
         
         # Сортировка по спреду (топ возможности первыми)
         opportunities.sort(key=lambda x: x.spread, reverse=True)

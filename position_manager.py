@@ -9,10 +9,11 @@ from strategy_selector import StrategySelector
 class PositionManager:
     """Автоматическое управление открытыми позициями"""
     
-    def __init__(self, trading_engine, strategy_selector, telegram_logger):
+    def __init__(self, trading_engine, strategy_selector, telegram_logger, risk_manager=None):
         self.trading_engine = trading_engine
         self.strategy_selector = strategy_selector
         self.telegram = telegram_logger
+        self.risk_manager = risk_manager  # Опционально для обновления баланса
         self.positions: Dict[str, Trade] = {}
         self.total_pnl = 0.0
         self.closed_positions = []
@@ -73,6 +74,12 @@ class PositionManager:
                 
                 self.total_pnl += pnl_usd
                 self.closed_positions.append(trade)
+                
+                # Обновляем баланс в risk manager
+                if self.risk_manager:
+                    self.risk_manager.update_balance(pnl_usd)
+                    # Удаляем позицию из risk manager
+                    self.risk_manager.unregister_position(trade.symbol, trade.exchange_long, trade.exchange_short)
                 
                 # Вывод
                 emoji = "✅" if pnl_usd > 0 else "❌"

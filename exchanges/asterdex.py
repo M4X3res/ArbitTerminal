@@ -109,52 +109,13 @@ class AsterDEXExchange(BaseExchange):
         if not self.api_key or not self.api_secret:
             raise ValueError("API credentials required")
         
-        timestamp = get_timestamp_ms()
-        params = {
-            "symbol": symbol,
-            "side": side.upper(),
-            "type": order_type.upper(),
-            "quantity": str(size),
-            "timestamp": timestamp
-        }
-        
-        query_string = build_query_string(params)
-        signature = sign_request_hmac(self.api_secret, query_string)
-        params["signature"] = signature
-        
-        headers = {"X-MBX-APIKEY": self.api_key}
-        
-        async with self.session.post(f"{self.rest_url}/fapi/v1/order", params=params, headers=headers) as resp:
-            return await resp.json()
-    
-    async def close_position(self, symbol: str, side: str):
-        """Закрытие позиции"""
-        if not self.api_key or not self.api_secret:
-            raise ValueError("API credentials required")
-        
-        timestamp = get_timestamp_ms()
-        params = {
-            "symbol": symbol,
-            "timestamp": timestamp
-        }
-        
-        query_string = build_query_string(params)
-        signature = sign_request_hmac(self.api_secret, query_string)
-        params["signature"] = signature
-        
-        headers = {"X-MBX-APIKEY": self.api_key}
-        
-        async with self.session.delete(f"{self.rest_url}/fapi/v1/allOpenOrders", params=params, headers=headers) as resp:
-            return await resp.json()
-    
-    async def get_balance(self) -> float:
-        """Получение баланса"""
-        if not self.api_key or not self.api_secret:
-            return 10000.0  # Demo режим
-        
-        try:
+        async def _make_request():
             timestamp = get_timestamp_ms()
             params = {
+                "symbol": symbol,
+                "side": side.upper(),
+                "type": order_type.upper(),
+                "quantity": str(size),
                 "timestamp": timestamp
             }
             
@@ -164,16 +125,70 @@ class AsterDEXExchange(BaseExchange):
             
             headers = {"X-MBX-APIKEY": self.api_key}
             
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{self.rest_url}/fapi/v2/account",
-                    params=params,
-                    headers=headers
-                ) as resp:
-                    data = await resp.json()
-                    if data.get("assets"):
-                        return float(data["assets"][0].get("availableBalance", 0))
-                    return 0.0
-        except Exception as e:
-            print(f"AsterDEX get_balance error: {e}")
-            return 10000.0
+            async with self.session.post(f"{self.rest_url}/fapi/v1/order", params=params, headers=headers) as resp:
+                if resp.status == 429:
+                    raise Exception("429 Rate limit exceeded")
+                return await resp.json()
+        
+        return await self._rate_limited_request(_make_request)
+    
+    async def close_position(self, symbol: str, side: str):
+        """Закрытие позиции"""
+        if not self.api_key or not self.api_secret:
+            raise ValueError("API credentials required")
+        
+        async def _make_request():
+            timestamp = get_timestamp_ms()
+            params = {
+                "symbol": symbol,
+                "timestamp": timestamp
+            }
+            
+            query_string = build_query_string(params)
+            signature = sign_request_hmac(self.api_secret, query_string)
+            params["signature"] = signature
+            
+            headers = {"X-MBX-APIKEY": self.api_key}
+            
+            async with self.session.delete(f"{self.rest_url}/fapi/v1/allOpenOrders", params=params, headers=headers) as resp:
+                if resp.status == 429:
+                    raise Exception("429 Rate limit exceeded")
+                return await resp.json()
+        
+        return await self._rate_limited_request(_make_request)
+    
+    async def get_balance(self) -> float:
+        """Получение баланса"""
+        if not self.api_key or not self.api_secret:
+            return 10000.0  # Demo режим
+        
+        async def _make_request():
+            try:
+                timestamp = get_timestamp_ms()
+                params = {
+                    "timestamp": timestamp
+                }
+                
+                query_string = build_query_string(params)
+                signature = sign_request_hmac(self.api_secret, query_string)
+                params["signature"] = signature
+                
+                headers = {"X-MBX-APIKEY": self.api_key}
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"{self.rest_url}/fapi/v2/account",
+                        params=params,
+                        headers=headers
+                    ) as resp:
+                        if resp.status == 429:
+                            raise Exception("429 Rate limit exceeded")
+                        data = await resp.json()
+                        if data.get("assets"):
+                            return float(data["assets"][0].get("availableBalance", 0))
+                        return 0.0
+            except Exception as e:
+                print(f"AsterDEX get_balance error: {e}")
+                return 10000.0
+        
+        return await self._rate_limited_request(_make_request)

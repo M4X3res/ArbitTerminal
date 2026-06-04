@@ -120,10 +120,15 @@ class MEXCExchange(BaseExchange):
         signature = sign_request_hmac(self.api_secret, query_string)
         params["sign"] = signature
         
-        async with aiohttp.ClientSession() as session:
-            headers = {"ApiKey": self.api_key, "Request-Time": str(params["timestamp"])}
-            async with session.post(f"{self.REST_URL}/api/v1/private/order/submit", json=params, headers=headers) as resp:
-                return await resp.json()
+        async def _make_request():
+            async with aiohttp.ClientSession() as session:
+                headers = {"ApiKey": self.api_key, "Request-Time": str(params["timestamp"])}
+                async with session.post(f"{self.REST_URL}/api/v1/private/order/submit", json=params, headers=headers) as resp:
+                    if resp.status == 429:
+                        raise Exception("429 Rate limit exceeded")
+                    return await resp.json()
+        
+        return await self._rate_limited_request(_make_request)
     
     async def close_position(self, symbol: str, side: str) -> Dict:
         """Закрытие позиции"""
@@ -139,10 +144,15 @@ class MEXCExchange(BaseExchange):
         signature = sign_request_hmac(self.api_secret, query_string)
         params["sign"] = signature
         
-        async with aiohttp.ClientSession() as session:
-            headers = {"ApiKey": self.api_key}
-            async with session.post(f"{self.REST_URL}/api/v1/private/position/close_all", json=params, headers=headers) as resp:
-                return await resp.json()
+        async def _make_request():
+            async with aiohttp.ClientSession() as session:
+                headers = {"ApiKey": self.api_key}
+                async with session.post(f"{self.REST_URL}/api/v1/private/position/close_all", json=params, headers=headers) as resp:
+                    if resp.status == 429:
+                        raise Exception("429 Rate limit exceeded")
+                    return await resp.json()
+        
+        return await self._rate_limited_request(_make_request)
     
     async def get_balance(self) -> float:
         """Получение баланса"""
@@ -154,25 +164,17 @@ class MEXCExchange(BaseExchange):
         signature = sign_request_hmac(self.api_secret, query_string)
         params["sign"] = signature
         
-        async with aiohttp.ClientSession() as session:
-            headers = {"ApiKey": self.api_key}
-            async with session.get(f"{self.REST_URL}/api/v1/private/account/assets", params=params, headers=headers) as resp:
-                data = await resp.json()
-                if data.get("success") and data.get("data"):
-                    return float(data["data"][0].get("availableBalance", 0))
-                return 0.0
-    
-    async def place_order(self, symbol: str, side: str, size: float, order_type: str = 'market') -> Dict:
-        """Размещение ордера"""
-        # TODO: Реализовать REST API для ордеров
-        return {"status": "pending", "order_id": "mock_id"}
-    
-    async def close_position(self, symbol: str, side: str) -> Dict:
-        """Закрытие позиции"""
-        # TODO: Реализовать закрытие позиции
-        return {"status": "closed"}
-    
-    async def get_balance(self) -> float:
-        """Получение баланса"""
-        # TODO: Реализовать получение баланса
-        return 10000.0
+        async def _make_request():
+            async with aiohttp.ClientSession() as session:
+                headers = {"ApiKey": self.api_key}
+                async with session.get(f"{self.REST_URL}/api/v1/private/account/assets", params=params, headers=headers) as resp:
+                    if resp.status == 429:
+                        raise Exception("429 Rate limit exceeded")
+                    data = await resp.json()
+                    if data.get("success") and data.get("data"):
+                        return float(data["data"][0].get("availableBalance", 0))
+                    return 0.0
+        
+        return await self._rate_limited_request(_make_request)
+
+

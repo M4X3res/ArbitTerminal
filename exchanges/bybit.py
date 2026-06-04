@@ -122,84 +122,63 @@ class BybitExchange(BaseExchange):
         if not self.api_key or not self.api_secret:
             raise ValueError("API credentials required")
         
-        try:
-            timestamp = get_timestamp_ms()
-            
-            # Body для POST запроса (Bybit v5 использует JSON body, не query params)
-            body = {
-                "category": "linear",
-                "symbol": symbol,
-                "side": side.capitalize(),  # Buy/Sell
-                "orderType": order_type.capitalize(),  # Market/Limit
-                "qty": str(size)
-            }
-            
-            body_json = json.dumps(body)
-            recv_window = "5000"
-            
-            # Подпись для v5 API
-            sign_string = f"{timestamp}{self.api_key}{recv_window}{body_json}"
-            signature = sign_request_hmac(self.api_secret, sign_string)
-            
-            headers = {
-                "X-BAPI-API-KEY": self.api_key,
-                "X-BAPI-SIGN": signature,
-                "X-BAPI-TIMESTAMP": str(timestamp),
-                "X-BAPI-RECV-WINDOW": recv_window,
-                "Content-Type": "application/json"
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.rest_url}/v5/order/create",
-                    data=body_json,
-                    headers=headers
-                ) as resp:
-                    data = await resp.json()
-                    if data.get("retCode") == 0:
-                        return data["result"]
-                    else:
-                        raise Exception(f"Bybit order error: {data.get('retMsg')}")
-        except Exception as e:
-            print(f"Bybit place_order error: {e}")
-            raise
+        async def _make_request():
+            try:
+                timestamp = get_timestamp_ms()
+                
+                # Body для POST запроса (Bybit v5 использует JSON body, не query params)
+                body = {
+                    "category": "linear",
+                    "symbol": symbol,
+                    "side": side.capitalize(),  # Buy/Sell
+                    "orderType": order_type.capitalize(),  # Market/Limit
+                    "qty": str(size)
+                }
+                
+                body_json = json.dumps(body)
+                recv_window = "5000"
+                
+                # Подпись для v5 API
+                sign_string = f"{timestamp}{self.api_key}{recv_window}{body_json}"
+                signature = sign_request_hmac(self.api_secret, sign_string)
+                
+                headers = {
+                    "X-BAPI-API-KEY": self.api_key,
+                    "X-BAPI-SIGN": signature,
+                    "X-BAPI-TIMESTAMP": str(timestamp),
+                    "X-BAPI-RECV-WINDOW": recv_window,
+                    "Content-Type": "application/json"
+                }
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{self.rest_url}/v5/order/create",
+                        data=body_json,
+                        headers=headers
+                    ) as resp:
+                        if resp.status == 429:
+                            raise Exception("429 Rate limit exceeded")
+                        data = await resp.json()
+                        if data.get("retCode") == 0:
+                            return data["result"]
+                        else:
+                            raise Exception(f"Bybit order error: {data.get('retMsg')}")
+            except Exception as e:
+                print(f"Bybit place_order error: {e}")
+                raise
+        
+        return await self._rate_limited_request(_make_request)
     
     async def close_position(self, symbol: str, side: str):
         """Закрытие позиции"""
         if not self.api_key or not self.api_secret:
             raise ValueError("API credentials required")
         
-        timestamp = get_timestamp_ms()
-        params = {
-            "category": "linear",
-            "symbol": symbol,
-            "timestamp": timestamp,
-            "recv_window": 5000
-        }
-        
-        query_string = '&'.join([f"{k}={v}" for k, v in sorted(params.items())])
-        signature = sign_request_hmac(self.api_secret, f"{timestamp}{self.api_key}{5000}{query_string}")
-        
-        headers = {
-            "X-BAPI-API-KEY": self.api_key,
-            "X-BAPI-SIGN": signature,
-            "X-BAPI-TIMESTAMP": str(timestamp),
-            "X-BAPI-RECV-WINDOW": "5000"
-        }
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(f"{self.rest_url}/v5/position/close", json=params, headers=headers) as resp:
-                return await resp.json()
-    
-    async def get_balance(self) -> float:
-        """Получение баланса"""
-        if not self.api_key or not self.api_secret:
-            return 10000.0  # Demo режим
-        
-        try:
+        async def _make_request():
             timestamp = get_timestamp_ms()
             params = {
-                "accountType": "UNIFIED",
+                "category": "linear",
+                "symbol": symbol,
                 "timestamp": timestamp,
                 "recv_window": 5000
             }
@@ -215,15 +194,51 @@ class BybitExchange(BaseExchange):
             }
             
             async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{self.rest_url}/v5/account/wallet-balance",
-                    params=params,
-                    headers=headers
-                ) as resp:
-                    data = await resp.json()
-                    if data.get("result") and data["result"].get("list"):
-                        return float(data["result"]["list"][0].get("totalAvailableBalance", 0))
-                    return 0.0
-        except Exception as e:
-            print(f"Bybit get_balance error: {e}")
-            return 10000.0
+                async with session.post(f"{self.rest_url}/v5/position/close", json=params, headers=headers) as resp:
+                    if resp.status == 429:
+                        raise Exception("429 Rate limit exceeded")
+                    return await resp.json()
+        
+        return await self._rate_limited_request(_make_request)
+    
+    async def get_balance(self) -> float:
+        """Получение баланса"""
+        if not self.api_key or not self.api_secret:
+            return 10000.0  # Demo режим
+        
+        async def _make_request():
+            try:
+                timestamp = get_timestamp_ms()
+                params = {
+                    "accountType": "UNIFIED",
+                    "timestamp": timestamp,
+                    "recv_window": 5000
+                }
+                
+                query_string = '&'.join([f"{k}={v}" for k, v in sorted(params.items())])
+                signature = sign_request_hmac(self.api_secret, f"{timestamp}{self.api_key}{5000}{query_string}")
+                
+                headers = {
+                    "X-BAPI-API-KEY": self.api_key,
+                    "X-BAPI-SIGN": signature,
+                    "X-BAPI-TIMESTAMP": str(timestamp),
+                    "X-BAPI-RECV-WINDOW": "5000"
+                }
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"{self.rest_url}/v5/account/wallet-balance",
+                        params=params,
+                        headers=headers
+                    ) as resp:
+                        if resp.status == 429:
+                            raise Exception("429 Rate limit exceeded")
+                        data = await resp.json()
+                        if data.get("result") and data["result"].get("list"):
+                            return float(data["result"]["list"][0].get("totalAvailableBalance", 0))
+                        return 0.0
+            except Exception as e:
+                print(f"Bybit get_balance error: {e}")
+                return 10000.0
+        
+        return await self._rate_limited_request(_make_request)

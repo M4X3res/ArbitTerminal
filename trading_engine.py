@@ -14,7 +14,6 @@ class TradingEngine:
         self.exchanges = exchanges
         self.demo_mode = demo_mode
         self.open_positions: Dict[str, Trade] = {}
-        self.orders_per_coin: Dict[str, int] = {}
     
     async def execute_arbitrage(self, opportunity: ArbitragePair, position_size: float, strategy_name: str = 'balanced') -> tuple[bool, str]:
         """Открытие арбитражной позиции"""
@@ -36,7 +35,6 @@ class TradingEngine:
                 open_time=datetime.now()
             )
             self.open_positions[pair_id] = trade
-            self.orders_per_coin[opportunity.symbol] = self.orders_per_coin.get(opportunity.symbol, 0) + 1
             return True, pair_id
         
         # Продакшн режим: реальные ордера
@@ -72,7 +70,6 @@ class TradingEngine:
                 open_time=datetime.now()
             )
             self.open_positions[pair_id] = trade
-            self.orders_per_coin[opportunity.symbol] = self.orders_per_coin.get(opportunity.symbol, 0) + 1
             
             return True, pair_id
             
@@ -91,8 +88,6 @@ class TradingEngine:
             # Демо режим: симулируем закрытие
             trade.status = 'closed'
             trade.close_time = datetime.now()
-            if trade.symbol in self.orders_per_coin:
-                self.orders_per_coin[trade.symbol] -= 1
             return True
         
         # Продакшн режим
@@ -106,8 +101,6 @@ class TradingEngine:
             if not any(isinstance(r, Exception) for r in results):
                 trade.status = 'closed'
                 trade.close_time = datetime.now()
-                if trade.symbol in self.orders_per_coin:
-                    self.orders_per_coin[trade.symbol] -= 1
                 return True
                 
         except Exception as e:

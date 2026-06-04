@@ -6,8 +6,16 @@ from config import (
     MAX_OPEN_POSITIONS, 
     MAX_SPREAD_OPEN,
     POSITION_SIZE_FRACTION,
-    MAX_ORDERS_PER_COIN
+    MAX_POSITIONS_PER_EXCHANGE
 )
+
+# Минимальный объём ордера на каждой бирже (USD)
+EXCHANGE_MIN_ORDER = {
+    'mexc': 5,
+    'gate': 5,
+    'bybit': 10,
+    'asterdex': 10
+}
 
 
 class RiskManager:
@@ -16,7 +24,7 @@ class RiskManager:
     def __init__(self, initial_balance: float = 1000):
         self.balance = initial_balance
         self.open_positions = []
-        self.orders_per_coin = {}
+        self.positions_per_exchange = {}  # Подсчет позиций по биржам
     
     def calculate_position_size(self) -> float:
         """Расчёт размера позиции (1/10 от баланса)"""
@@ -25,14 +33,19 @@ class RiskManager:
     def check_opportunity(self, opportunity: ArbitragePair, market_data: Dict) -> Dict:
         """Проверка арбитражной возможности на риски"""
         
-        # 1. Проверка количества открытых позиций
+        # 1. Проверка количества открытых позиций (общее)
         if len(self.open_positions) >= MAX_OPEN_POSITIONS:
             return {"approved": False, "reason": f"Max positions reached ({MAX_OPEN_POSITIONS})"}
         
-        # 2. Проверка лимита ордеров на монету
-        coin_orders = self.orders_per_coin.get(opportunity.symbol, 0)
-        if coin_orders >= MAX_ORDERS_PER_COIN:
-            return {"approved": False, "reason": f"Max orders per {opportunity.symbol} ({MAX_ORDERS_PER_COIN})"}
+        # 2. Проверка лимита позиций на биржах
+        long_positions = self.positions_per_exchange.get(opportunity.exchange_long, 0)
+        short_positions = self.positions_per_exchange.get(opportunity.exchange_short, 0)
+        
+        if long_positions >= MAX_POSITIONS_PER_EXCHANGE:
+            return {"approved": False, "reason": f"Max positions on {opportunity.exchange_long} ({MAX_POSITIONS_PER_EXCHANGE})"}
+        
+        if short_positions >= MAX_POSITIONS_PER_EXCHANGE:
+            return {"approved": False, "reason": f"Max positions on {opportunity.exchange_short} ({MAX_POSITIONS_PER_EXCHANGE})"}
         
         # 3. Проверка спреда (минимум и максимум)
         if opportunity.spread < 0.1:
@@ -49,6 +62,14 @@ class RiskManager:
         position_size = self.calculate_position_size()
         if position_size < 10:  # Минимум 10 USD
             return {"approved": False, "reason": "Insufficient balance"}
+        
+        # 5.1. Проверка минимального объёма ордера по биржам
+        min_long = EXCHANGE_MIN_ORDER.get(opportunity.exchange_long, 10)
+        min_short = EXCHANGE_MIN_ORDER.get(opportunity.exchange_short, 10)
+        min_required = max(min_long, min_short)
+        
+        if position_size < min_required:
+            return {"approved": False, "reason": f"Position size ${position_size:.2f} below exchange minimum ${min_required}"}
         
         # 6. Проверка спреда bid-ask (ликвидность)
         long_data = market_data.get(opportunity.exchange_long, {}).get(opportunity.symbol)
@@ -68,15 +89,31 @@ class RiskManager:
             "position_size": position_size
         }
     
-    def register_position(self, symbol: str):
+    def register_position(self, symbol: str, exchange_long: str, exchange_short: str):
         """Регистрация открытой позиции"""
         self.open_positions.append(symbol)
-        self.orders_per_coin[symbol] = self.orders_per_coin.get(symbol, 0) + 1
+        # Увеличиваем счетчики для обеих бирж
+        self.positions_per_exchange[exchange_long] = self.positions_per_exchange.get(exchange_long, 0) + 1
+        self.positions_per_exchange[exchange_short] = self.positions_per_exchange.get(exchange_short, 0) + 1
     
-    def unregister_position(self, symbol: str):
+    def unregister_position(self, symbol: str, exchange_long: str = None, exchange_short: str = None):
         """Удаление закрытой позиции"""
         if symbol in self.open_positions:
             self.open_positions.remove(symbol)
-        if symbol in self.orders_per_coin:
-            self.orders_per_coin[symbol] -= 1
+        
+        # Уменьшаем счетчики для бирж
+        if exchange_long and exchange_long in self.positions_per_exchange:
+            self.positions_per_exchange[exchange_long] -= 1
+            if self.positions_per_exchange[exchange_long] <= 0:
+                del self.positions_per_exchange[exchange_long]
+        
+        if exchange_short and exchange_short in self.positions_per_exchange:
+            self.positions_per_exchange[exchange_short] -= 1
+            if self.positions_per_exchange[exchange_short] <= 0:
+                del self.positions_per_exchange[exchange_short]
+    
+    def update_balance(self, pnl: float):
+        """Обновление баланса после закрытия позиции"""
+        self.balance += pnl
+        print(f"💰 Balance updated: {self.balance:.2f} USD (PnL: {pnl:+.2f} USD)")
 

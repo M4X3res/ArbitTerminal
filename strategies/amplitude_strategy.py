@@ -43,8 +43,15 @@ class AmplitudeStrategy:
         # Совокупная амплитуда в %
         amplitude_pct = pnl_long + pnl_short
         
-        # Конвертируем в USD
-        amplitude_usd = amplitude_pct * trade.position_size_usd / 100
+        # Конвертируем в USD с учётом leverage
+        # Реальная позиция = position_size_usd * leverage, но PnL считается от реальной позиции
+        leverage = getattr(trade, 'leverage', 10)
+        amplitude_usd = amplitude_pct * trade.position_size_usd * leverage / 100
+        
+        # Вычитаем комиссии: 4 операции × 0.05% maker fee (или 0.1% taker)
+        fee_rate = 0.0005  # 0.05% maker fee
+        total_fees = trade.position_size_usd * leverage * fee_rate * 4
+        amplitude_usd -= total_fees
         
         return amplitude_usd
     

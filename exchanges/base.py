@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from typing import List, Dict
 import aiohttp
 from models import MarketData
+from rate_limiter import get_rate_limiter
 
 
 class BaseExchange(ABC):
@@ -14,6 +15,7 @@ class BaseExchange(ABC):
         self.api_secret = api_secret
         self.ws = None
         self.session = None
+        self.rate_limiter = get_rate_limiter(name)  # Rate limiter для REST API
     
     async def initialize(self):
         """Инициализация HTTP сессии и WebSocket"""
@@ -26,6 +28,10 @@ class BaseExchange(ABC):
             await self.ws.close()
         if self.session:
             await self.session.close()
+    
+    async def _rate_limited_request(self, coro):
+        """Выполнить HTTP запрос с rate limiting"""
+        return await self.rate_limiter.execute_with_retry(coro)
         
     @abstractmethod
     async def connect_ws(self):

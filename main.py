@@ -1,7 +1,20 @@
 """Главный модуль арбитражной системы"""
 import asyncio
+import logging
+from logging.handlers import RotatingFileHandler
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    handlers=[
+        RotatingFileHandler('arbitrage.log', maxBytes=10*1024*1024, backupCount=5),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 from env_loader import get_api_keys
 from exchanges.mexc import MEXCExchange
@@ -117,7 +130,8 @@ class ArbitrageSystem:
         self.position_manager = PositionManager(
             self.trading_engine,
             self.strategy_selector,
-            self.telegram
+            self.telegram,
+            self.risk_manager  # Передаём risk_manager для обновления баланса
         )
         
         mode_text = "DEMO" if self.demo_mode else "LIVE"
@@ -215,6 +229,18 @@ class ArbitrageSystem:
                     print(f"      Спред: {opp.spread:.3f}% | Funding: {opp.funding_diff:.4f}")
                     
                     if risk_check["approved"]:
+                        # Повторная проверка спреда перед открытием (защита от схлопывания)
+                        long_data = market_data.get(opp.exchange_long, {}).get(opp.symbol)
+                        short_data = market_data.get(opp.exchange_short, {}).get(opp.symbol)
+                        
+                        if long_data and short_data:
+                            current_spread = (short_data.bid - long_data.ask) / long_data.ask * 100
+                            
+                            # Если спред упал более чем на 10%, пропускаем
+                            if current_spread < opp.spread * 0.9:
+                                print(f"      ⚠️ Спред схлопнулся: {opp.spread:.2f}% → {current_spread:.2f}%, пропускаем")
+                                continue
+                        
                         # Динамический выбор стратегии по спреду
                         strategy, strategy_name = self.strategy_selector.select_strategy(opp.spread)
                         
@@ -227,7 +253,7 @@ class ArbitrageSystem:
                         if success:
                             trade = self.trading_engine.get_position(pair_id)
                             self.position_manager.register_position(trade)
-                            self.risk_manager.register_position(opp.symbol)
+                            self.risk_manager.register_position(opp.symbol, opp.exchange_long, opp.exchange_short)
                             
                             print(f"      ✅ Позиция открыта: {pair_id[:8]}... (стратегия: {strategy_name})")
                             

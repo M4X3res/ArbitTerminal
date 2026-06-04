@@ -134,62 +134,6 @@ class GateExchange(BaseExchange):
                 
                 return []
     
-    async def place_order(self, symbol: str, side: str, size: float, order_type: str = 'market') -> Dict:
-        """Размещение ордера"""
-        # TODO: Реализовать REST API для ордеров с подписью
-        return {"status": "pending", "order_id": "mock_id"}
-    
-    async def close_position(self, symbol: str, side: str) -> Dict:
-        """Закрытие позиции"""
-        # TODO: Реализовать закрытие позиции
-        return {"status": "closed"}
-    
-    async def get_balance(self) -> float:
-        """Получение баланса"""
-        if not self.api_key or not self.api_secret:
-            return 10000.0  # Demo режим
-        
-        try:
-            import time
-            timestamp = str(int(time.time()))
-            method = "GET"
-            url_path = "/futures/usdt/accounts"
-            query = ""
-            body = ""
-            
-            # Hash body
-            body_hash = hashlib.sha512(body.encode()).hexdigest()
-            
-            # Строка для подписи Gate.io
-            sign_string = f"{method}\n/api/v4{url_path}\n{query}\n{body_hash}\n{timestamp}"
-            signature = hmac.new(
-                self.api_secret.encode(),
-                sign_string.encode(),
-                hashlib.sha512
-            ).hexdigest()
-            
-            headers = {
-                'KEY': self.api_key,
-                'Timestamp': timestamp,
-                'SIGN': signature
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{self.REST_URL}{url_path}",
-                    headers=headers
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        return float(data.get('total', 0))
-                    else:
-                        error_text = await resp.text()
-                        print(f"Gate.io get_balance error ({resp.status}): {error_text[:200]}")
-                        return 0.0
-        except Exception as e:
-            print(f"Gate.io get_balance error: {e}")
-            return 10000.0
-
     def _sign_gate(self, method: str, url: str, query: str = "", body: str = "") -> Dict[str, str]:
         """Gate.io подпись"""
         timestamp = str(int(time.time()))
@@ -220,9 +164,14 @@ class GateExchange(BaseExchange):
         headers = self._sign_gate("POST", url, "", body)
         headers["Content-Type"] = "application/json"
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(f"{self.REST_URL}{url}", data=body, headers=headers) as resp:
-                return await resp.json()
+        async def _make_request():
+            async with aiohttp.ClientSession() as session:
+                async with session.post(f"{self.REST_URL}{url}", data=body, headers=headers) as resp:
+                    if resp.status == 429:
+                        raise Exception("429 Rate limit exceeded")
+                    return await resp.json()
+        
+        return await self._rate_limited_request(_make_request)
     
     async def close_position(self, symbol: str, side: str) -> Dict:
         """Закрытие позиции"""
@@ -236,9 +185,14 @@ class GateExchange(BaseExchange):
         headers = self._sign_gate("POST", url, "", body)
         headers["Content-Type"] = "application/json"
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(f"{self.REST_URL}{url}", data=body, headers=headers) as resp:
-                return await resp.json()
+        async def _make_request():
+            async with aiohttp.ClientSession() as session:
+                async with session.post(f"{self.REST_URL}{url}", data=body, headers=headers) as resp:
+                    if resp.status == 429:
+                        raise Exception("429 Rate limit exceeded")
+                    return await resp.json()
+        
+        return await self._rate_limited_request(_make_request)
     
     async def get_balance(self) -> float:
         """Получение баланса"""
@@ -250,7 +204,12 @@ class GateExchange(BaseExchange):
         
         headers = self._sign_gate("GET", url)
         
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{self.REST_URL}{url}", headers=headers) as resp:
-                data = await resp.json()
-                return float(data.get("available", 0))
+        async def _make_request():
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{self.REST_URL}{url}", headers=headers) as resp:
+                    if resp.status == 429:
+                        raise Exception("429 Rate limit exceeded")
+                    data = await resp.json()
+                    return float(data.get("available", 0))
+        
+        return await self._rate_limited_request(_make_request)

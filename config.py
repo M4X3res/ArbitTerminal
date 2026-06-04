@@ -27,8 +27,8 @@ MAX_HOLD_TIME_COLLAPSE = 3600  # 1 час
 
 # === РИСК-МЕНЕДЖМЕНТ ===
 POSITION_SIZE_FRACTION = 0.1
-MAX_OPEN_POSITIONS = 3
-MAX_ORDERS_PER_COIN = 1
+MAX_OPEN_POSITIONS = 3  # Максимум 3 позиции одновременно (на всех биржах)
+MAX_POSITIONS_PER_EXCHANGE = 3  # Максимум 3 позиции на одной бирже
 MAX_LEVERAGE = 10
 MIN_LIQUIDITY_MULTIPLIER = 1.5
 
