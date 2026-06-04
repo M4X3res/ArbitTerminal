@@ -50,6 +50,7 @@ class BybitExchange(BaseExchange):
                 
                 await self.connect_ws()
                 await self.subscribe_orderbook(symbols)
+                await self.subscribe_funding_rate(symbols)  # 🔧 FIX: Добавлена подписка на funding
                 
                 # 🔧 FIX: Явный receive() вместо async for для предотвращения race condition
                 while self.ws_running and self.ws:
