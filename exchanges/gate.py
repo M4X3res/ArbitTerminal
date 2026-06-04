@@ -24,7 +24,6 @@ class GateExchange(BaseExchange):
         self.orderbooks = {}
         self.funding_rates = {}
         self.instruments = []
-        self._ping_task = None
         self.ws_running = False
     
     async def start_websocket_listener(self, symbols: List[str]):
@@ -39,10 +38,6 @@ class GateExchange(BaseExchange):
         while self.ws_running:
             try:
                 # 🔧 FIX: Закрываем старое соединение перед реконнектом
-                if self._ping_task:
-                    self._ping_task.cancel()
-                    self._ping_task = None
-                
                 if hasattr(self, 'ws') and self.ws:
                     try:
                         await self.ws.close()
@@ -65,15 +60,11 @@ class GateExchange(BaseExchange):
                     
             except Exception as e:
                 print(f"❌ Gate.io WebSocket error: {e}, reconnecting...")
-                if self._ping_task:
-                    self._ping_task.cancel()
                 await asyncio.sleep(2)
     
     async def stop_websocket(self):
         """Остановка WebSocket"""
         self.ws_running = False
-        if self._ping_task:
-            self._ping_task.cancel()
         if self.ws:
             await self.ws.close()
     
@@ -126,20 +117,12 @@ class GateExchange(BaseExchange):
     
     async def connect_ws(self):
         """Подключение к WebSocket"""
-        self.ws = await websockets.connect(self.WS_URL)
-        self._ping_task = asyncio.create_task(self._ping_loop())
+        self.ws = await websockets.connect(
+            self.WS_URL,
+            ping_interval=15,  # Отправлять ping каждые 15 секунд
+            ping_timeout=30    # Ждать pong 30 секунд
+        )
         print(f"✅ Gate.io WebSocket connected")
-    
-    async def _ping_loop(self):
-        """Отправка ping каждые 30 секунд"""
-        while True:
-            try:
-                await asyncio.sleep(30)
-                if self.ws:
-                    await self.ws.ping()
-            except Exception as e:
-                print(f"Gate.io ping error: {e}")
-                break
     
     async def subscribe_orderbook(self, symbols: List[str]):
         """Подписка на orderbook для списка символов"""
