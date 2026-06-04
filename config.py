@@ -1,0 +1,51 @@
+"""Конфигурация арбитражной системы"""
+
+# Биржи (3 working exchanges)
+EXCHANGES = ['mexc', 'gate', 'bybit']
+
+# === СТРАТЕГИЯ ОТКРЫТИЯ ===
+# Стратегия выбирается АВТОМАТИЧЕСКИ по размеру спреда:
+# - 0.7-2%: amplitude (быстрый скальпинг)
+# - 2-5%: balanced (средняя)
+# - 5%+: collapse (схлопывание)
+
+OPEN_THRESHOLD = 0.7  # Минимальный спред для открытия
+MAX_SPREAD_OPEN = 15.0  # Максимальный спред
+
+# === СТРАТЕГИЯ ЗАКРЫТИЯ ===
+# Amplitude Strategy
+AMPLITUDE_WINDOW = 50
+AMPLITUDE_THRESHOLD = 0.7
+MIN_AMPLITUDE_USD = 5.0
+STOP_LOSS_MULTIPLIER = 2.0
+MAX_HOLD_TIME_SEC = 300  # 5 минут
+
+# Collapse Strategy
+COLLAPSE_THRESHOLD = 0.1     # Спред схлопнулся до 0.1%
+MIN_PROFIT_PCT = 0.05        # Минимальная прибыль 0.05%
+MAX_HOLD_TIME_COLLAPSE = 3600  # 1 час
+
+# === РИСК-МЕНЕДЖМЕНТ ===
+POSITION_SIZE_FRACTION = 0.1
+MAX_OPEN_POSITIONS = 3
+MAX_ORDERS_PER_COIN = 1
+MAX_LEVERAGE = 10
+MIN_LIQUIDITY_MULTIPLIER = 1.5
+
+# === TELEGRAM УВЕДОМЛЕНИЯ ===
+# Получите ваш chat_id через @userinfobot в Telegram
+TELEGRAM_BOT_TOKEN = "7768319583:AAEV2q1mwmnkA9MHDDocKeWqirFNBYx3qdc"
+TELEGRAM_CHAT_ID = "865213607"    # Получите через @userinfobot (это НЕ токен бота!)
+
+# Устаревшие (для совместимости)
+MAX_POSITION_SIZE = 1000
+PROFIT_THRESHOLD_K = 0.8
+CLOSE_THRESHOLD = 50
+
+# Мониторинг
+SPREAD_HISTORY_LENGTH = 100
+LATENCY_WARNING_MS = 500
+
+# WebSocket
+WS_RECONNECT_DELAY = 5
+WS_PING_INTERVAL = 30
