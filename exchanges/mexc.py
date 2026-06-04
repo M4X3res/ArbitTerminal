@@ -18,11 +18,49 @@ class MEXCExchange(BaseExchange):
     WS_URL = "wss://contract.mexc.com/edge"
     REST_URL = "https://contract.mexc.com"
     
-    def __init__(self, api_key: str = None, api_secret: str = None):
+    def __init__(self, api_key: str = "", api_secret: str = ""):
         super().__init__("mexc", api_key, api_secret)
         self.orderbooks = {}
         self.funding_rates = {}
         self.instruments = []
+        self.ws_running = False
+    
+    async def start_websocket_listener(self, symbols: List[str]):
+        """Запуск WebSocket слушателя с автоматическим реконнектом"""
+        self.ws_running = True
+        
+        while self.ws_running:
+            try:
+                # 🔧 FIX: Закрываем старое соединение перед реконнектом
+                if hasattr(self, 'ws') and self.ws:
+                    try:
+                        await self.ws.close()
+                    except Exception:
+                        pass
+                    self.ws = None
+                
+                await self.connect_ws()
+                await self.subscribe_orderbook(symbols)
+                
+                # Бесконечный цикл получения сообщений
+                async for message in self.ws:
+                    data = json.loads(message)
+                    await self._handle_message(data)
+                    
+            except Exception as e:
+                print(f"❌ MEXC WebSocket error: {e}, reconnecting...")
+                await asyncio.sleep(2)
+    
+    async def stop_websocket(self):
+        """Остановка WebSocket"""
+        self.ws_running = False
+        if self.ws:
+            await self.ws.close()
+    
+    async def _handle_message(self, data: dict):
+        """Обработка входящего сообщения"""
+        # Простая обработка для теста
+        pass
     
     async def connect_ws(self):
         """Подключение к WebSocket"""

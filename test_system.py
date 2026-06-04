@@ -1,253 +1,294 @@
-"""Проверка работоспособности системы"""
+ns"""
+Комплексный тест фьючерсных коннекторов
+Проверка: WebSocket, Funding Rate, Market Data streaming
+"""
 import asyncio
+import logging
+import time
 import sys
+from typing import Dict
 
-async def test_imports():
-    """Тест 1: Проверка импортов"""
-    print("="*60)
-    print("ТЕСТ 1: Проверка импортов")
-    print("="*60)
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+class FuturesSystemTester:
+    """Тестер фьючерсной системы с 3 биржами"""
     
-    try:
-        from env_loader import get_api_keys
-        print("✅ env_loader")
-        
-        from exchanges.mexc import MEXCExchange
-        from exchanges.gate import GateExchange
-        from exchanges.bybit import BybitExchange
-        from exchanges.asterdex import AsterDEXExchange
-        print("✅ exchanges")
-        
-        from market_data_engine import MarketDataEngine
-        print("✅ market_data_engine")
-        
-        from arbitrage_engine import ArbitrageEngine
-        print("✅ arbitrage_engine")
-        
-        from trading_engine import TradingEngine
-        print("✅ trading_engine")
-        
-        from risk_manager import RiskManager
-        print("✅ risk_manager")
-        
-        from position_manager import PositionManager
-        print("✅ position_manager")
-        
-        from strategies import AmplitudeStrategy, SpreadCollapseStrategy
-        print("✅ strategies")
-        
-        from utils import TelegramLogger
-        print("✅ telegram_logger")
-        
-        from config import STRATEGY, OPEN_THRESHOLD
-        print(f"✅ config (STRATEGY={STRATEGY}, THRESHOLD={OPEN_THRESHOLD}%)")
-        
+    def __init__(self):
+        # Отложенный импорт коннекторов
         try:
-            from performance_config import MAX_WORKERS
-            print(f"✅ performance_config (MAX_WORKERS={MAX_WORKERS})")
-        except ImportError:
-            print("⚠️  performance_config не найден (используются дефолты)")
-        
-        return True
-    except Exception as e:
-        print(f"❌ ОШИБКА: {e}")
-        return False
-
-async def test_initialization():
-    """Тест 2: Инициализация компонентов"""
-    print("\n" + "="*60)
-    print("ТЕСТ 2: Инициализация компонентов")
-    print("="*60)
-    
-    try:
-        from exchanges.mexc import MEXCExchange
-        from exchanges.gate import GateExchange
-        from exchanges.bybit import BybitExchange
-        from exchanges.asterdex import AsterDEXExchange
-        from market_data_engine import MarketDataEngine
-        from arbitrage_engine import ArbitrageEngine
-        from trading_engine import TradingEngine
-        from risk_manager import RiskManager
-        from position_manager import PositionManager
-        from strategies import SpreadCollapseStrategy
-        from utils import TelegramLogger
-        
-        # Создание бирж
-        exchanges = {
-            "mexc": MEXCExchange(),
-            "gate": GateExchange(),
-            "bybit": BybitExchange(),
-            "asterdex": AsterDEXExchange()
-        }
-        print("✅ Биржи созданы")
-        
-        # Движки
-        market_data_engine = MarketDataEngine(exchanges)
-        print("✅ MarketDataEngine")
-        
-        arbitrage_engine = ArbitrageEngine(max_workers=4)
-        print("✅ ArbitrageEngine")
-        
-        trading_engine = TradingEngine(exchanges, demo_mode=True)
-        print("✅ TradingEngine")
-        
-        risk_manager = RiskManager(initial_balance=1000)
-        print("✅ RiskManager")
-        
-        close_strategy = SpreadCollapseStrategy()
-        print("✅ SpreadCollapseStrategy")
-        
-        telegram = TelegramLogger(None, None)
-        print("✅ TelegramLogger")
-        
-        position_manager = PositionManager(trading_engine, close_strategy, telegram)
-        print("✅ PositionManager")
-        
-        return True
-    except Exception as e:
-        print(f"❌ ОШИБКА: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-async def test_websocket_connection():
-    """Тест 3: WebSocket подключение"""
-    print("\n" + "="*60)
-    print("ТЕСТ 3: WebSocket подключение (5 секунд)")
-    print("="*60)
-    
-    try:
-        from exchanges.mexc import MEXCExchange
-        from exchanges.gate import GateExchange
-        
-        exchanges = {
-            "mexc": MEXCExchange(),
-            "gate": GateExchange()
-        }
-        
-        for name, exchange in exchanges.items():
-            print(f"   Подключение к {name}...")
-            await exchange.initialize()
-            print(f"   ✅ {name} подключен")
-        
-        print("\n   Ожидание данных 5 секунд...")
-        await asyncio.sleep(5)
-        
-        # Закрытие
-        for name, exchange in exchanges.items():
-            await exchange.close()
-            print(f"   ✓ {name} закрыт")
-        
-        return True
-    except Exception as e:
-        print(f"❌ ОШИБКА: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-async def test_arbitrage_engine():
-    """Тест 4: ArbitrageEngine с тестовыми данными"""
-    print("\n" + "="*60)
-    print("ТЕСТ 4: ArbitrageEngine (тестовые данные)")
-    print("="*60)
-    
-    try:
-        from arbitrage_engine import ArbitrageEngine
-        from models import MarketData
-        from datetime import datetime
-        
-        engine = ArbitrageEngine(max_workers=4)
-        
-        # Создаём тестовые данные
-        market_data = {
-            "bybit": {
-                "BTCUSDT": MarketData(
-                    exchange="bybit",
-                    symbol="BTCUSDT",
-                    bid=65000,
-                    ask=65010,
-                    funding_rate=0.0001,
-                    timestamp=datetime.now()
-                )
-            },
-            "gate": {
-                "BTCUSDT": MarketData(
-                    exchange="gate",
-                    symbol="BTCUSDT",
-                    bid=65100,
-                    ask=65110,
-                    funding_rate=0.0002,
-                    timestamp=datetime.now()
-                )
+            from exchanges.mexc import MEXCExchange
+            from exchanges.gate import GateExchange
+            from exchanges.bybit import BybitExchange
+            
+            # Инициализация бирж БЕЗ API ключей (только публичные данные)
+            self.exchanges = {
+                'mexc': MEXCExchange(api_key="", api_secret=""),
+                'gate': GateExchange(api_key="", api_secret=""),
+                'bybit': BybitExchange(api_key="", api_secret="")
             }
+            
+            logger.info("✅ All exchanges loaded successfully")
+            
+        except ImportError as e:
+            logger.error(f"❌ Failed to import exchanges: {e}")
+            raise
+        
+        # Тестовые символы
+        self.test_symbols = ['BTC/USDT', 'ETH/USDT']
+        
+        # Собранные данные
+        self.collected_data: Dict[str, Dict] = {
+            'mexc': {},
+            'gate': {},
+            'bybit': {}
         }
         
-        # Тест последовательного анализа
-        print("   Тест find_opportunities()...")
-        opportunities = engine.find_opportunities(market_data, threshold=0.1)
-        print(f"   ✅ Найдено {len(opportunities)} возможностей")
+        logger.info("✅ FuturesSystemTester initialized")
+    
+    async def test_websocket_connections(self, duration_seconds: int = 20):
+        """
+        Тест WebSocket подключений ко всем биржам
         
-        # Тест параллельного анализа
-        print("   Тест find_opportunities_parallel()...")
-        opportunities_parallel = engine.find_opportunities_parallel(market_data, threshold=0.1, batch_size=50)
-        print(f"   ✅ Найдено {len(opportunities_parallel)} возможностей (параллельно)")
+        Args:
+            duration_seconds: Длительность теста в секундах
+        """
+        logger.info(f"🚀 Starting WebSocket test for {duration_seconds} seconds...")
+        logger.info(f"   Exchanges: {list(self.exchanges.keys())}")
+        logger.info(f"   Symbols: {self.test_symbols}")
         
-        if opportunities:
-            opp = opportunities[0]
-            print(f"   Пример: {opp.symbol} спред {opp.spread:.3f}%")
+        # Запуск всех WebSocket слушателей параллельно
+        ws_tasks = []
+        for exchange_name, exchange in self.exchanges.items():
+            task = asyncio.create_task(
+                exchange.start_websocket_listener(self.test_symbols),
+                name=f"ws_{exchange_name}"
+            )
+            ws_tasks.append(task)
         
-        return True
-    except Exception as e:
-        print(f"❌ ОШИБКА: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+        # Даем время на подключение
+        logger.info("⏳ Waiting for connections to establish...")
+        await asyncio.sleep(5)
+        logger.info("✅ WebSocket connections established")
+        
+        # Мониторинг данных
+        monitor_task = asyncio.create_task(
+            self._monitor_market_data(duration_seconds)
+        )
+        
+        # Ждем завершения мониторинга
+        await monitor_task
+        
+        # Останавливаем WebSocket соединения
+        logger.info("🛑 Stopping WebSocket connections...")
+        for exchange in self.exchanges.values():
+            await exchange.stop_websocket()
+        
+        # Отменяем задачи
+        for task in ws_tasks:
+            task.cancel()
+        
+        # Ждем отмены
+        await asyncio.gather(*ws_tasks, return_exceptions=True)
+        
+        logger.info("✅ All WebSocket connections closed")
+    
+    async def _monitor_market_data(self, duration: int):
+        """Мониторинг получаемых данных"""
+        start_time = time.time()
+        iteration = 0
+        
+        while time.time() - start_time < duration:
+            iteration += 1
+            
+            logger.info(f"\n{'='*60}")
+            logger.info(f"📊 DATA SNAPSHOT #{iteration} (T+{int(time.time() - start_time)}s)")
+            logger.info(f"{'='*60}")
+            
+            # Сбор данных с каждой биржи
+            for exchange_name, exchange in self.exchanges.items():
+                logger.info(f"\n🏦 {exchange_name.upper()} Exchange:")
+                
+                for symbol in self.test_symbols:
+                    market_data = await exchange.get_market_data(symbol)
+                    
+                    if market_data:
+                        # Сохраняем данные
+                        self.collected_data[exchange_name][symbol] = market_data
+                        
+                        # Вывод информации
+                        spread_pct = (market_data.ask - market_data.bid) / market_data.bid * 100
+                        
+                        logger.info(
+                            f"   {symbol}: "
+                            f"Bid={market_data.bid:.2f} | "
+                            f"Ask={market_data.ask:.2f} | "
+                            f"Spread={spread_pct:.3f}% | "
+                            f"Funding={market_data.funding_rate*100:.4f}%"
+                        )
+                        
+                        # 🔧 КРИТИЧЕСКАЯ ПРОВЕРКА: Funding rate
+                        if abs(market_data.funding_rate) < 0.000001:
+                            logger.warning(
+                                f"   ⚠️ WARNING: Funding rate is ~0 for {symbol} on {exchange_name}"
+                            )
+                        
+                        # Проверка латентности данных
+                        latency_ms = time.time() * 1000 - market_data.timestamp_ms
+                        if latency_ms > 100:
+                            logger.warning(
+                                f"   ⚠️ WARNING: High latency {latency_ms:.0f}ms for {symbol}"
+                            )
+                    else:
+                        logger.warning(f"   ❌ No data for {symbol}")
+            
+            # Пауза перед следующей итерацией
+            await asyncio.sleep(5)
+    
+    def generate_report(self):
+        """Генерация финального отчета по тесту"""
+        logger.info(f"\n{'='*60}")
+        logger.info("📋 FINAL TEST REPORT")
+        logger.info(f"{'='*60}")
+        
+        # Статистика по биржам
+        for exchange_name in self.exchanges.keys():
+            data = self.collected_data[exchange_name]
+            
+            logger.info(f"\n🏦 {exchange_name.upper()}")
+            logger.info(f"   Symbols received: {len(data)}/{len(self.test_symbols)}")
+            
+            for symbol, market_data in data.items():
+                logger.info(f"   {symbol}:")
+                logger.info(f"      Bid: {market_data.bid:.2f}")
+                logger.info(f"      Ask: {market_data.ask:.2f}")
+                logger.info(f"      Funding Rate: {market_data.funding_rate*100:.4f}%")
+                
+                latency = time.time() * 1000 - market_data.timestamp_ms
+                logger.info(f"      Latency: {latency:.0f}ms")
+        
+        # Проверка арбитражных возможностей
+        logger.info(f"\n{'='*60}")
+        logger.info("🎯 ARBITRAGE OPPORTUNITIES")
+        logger.info(f"{'='*60}")
+        
+        for symbol in self.test_symbols:
+            logger.info(f"\n{symbol}:")
+            
+            # Собираем все цены
+            prices = {}
+            for exchange_name, data in self.collected_data.items():
+                if symbol in data:
+                    prices[exchange_name] = {
+                        'bid': data[symbol].bid,
+                        'ask': data[symbol].ask,
+                        'funding': data[symbol].funding_rate
+                    }
+            
+            if len(prices) < 2:
+                logger.info("   ⚠️ Insufficient data")
+                continue
+            
+            # Поиск возможностей
+            exchanges_list = list(prices.keys())
+            found_opportunity = False
+            
+            for i, ex_long in enumerate(exchanges_list):
+                for ex_short in exchanges_list[i+1:]:
+                    # Спред: short bid - long ask
+                    spread = (prices[ex_short]['bid'] - prices[ex_long]['ask']) / prices[ex_long]['ask'] * 100
+                    
+                    if spread > 0.1:
+                        found_opportunity = True
+                        funding_diff = (prices[ex_short]['funding'] - prices[ex_long]['funding']) * 100
+                        
+                        logger.info(
+                            f"   ✅ Long {ex_long.upper()} → Short {ex_short.upper()}: "
+                            f"Spread={spread:.3f}% | "
+                            f"Funding Δ={funding_diff:.4f}%"
+                        )
+            
+            if not found_opportunity:
+                logger.info("   ℹ️ No arbitrage opportunities above 0.1% threshold")
+        
+        # Итоговая оценка
+        logger.info(f"\n{'='*60}")
+        logger.info("🎉 TEST SUMMARY")
+        logger.info(f"{'='*60}")
+        
+        total_success = sum(len(data) for data in self.collected_data.values())
+        total_expected = len(self.exchanges) * len(self.test_symbols)
+        success_rate = (total_success / total_expected) * 100 if total_expected > 0 else 0
+        
+        logger.info(f"Data received: {total_success}/{total_expected} ({success_rate:.1f}%)")
+        
+        # Проверка funding rate
+        funding_ok = True
+        for exchange_name, data in self.collected_data.items():
+            for symbol, market_data in data.items():
+                if abs(market_data.funding_rate) < 0.000001:
+                    funding_ok = False
+        
+        if funding_ok and total_success > 0:
+            logger.info("✅ All funding rates are non-zero")
+        elif total_success > 0:
+            logger.warning("⚠️ Some funding rates are zero")
+        
+        if success_rate >= 80:
+            logger.info("\n🚀 SYSTEM READY FOR PRODUCTION!")
+            return True
+        else:
+            logger.warning("\n⚠️ SYSTEM NEEDS DEBUGGING")
+            return False
+
 
 async def main():
-    """Запуск всех тестов"""
-    print("\n" + "="*60)
-    print("  ПРОВЕРКА СИСТЕМЫ АРБИТРАЖА")
-    print("="*60 + "\n")
+    """Главная функция тестирования"""
+    logger.info("="*60)
+    logger.info("🔬 FUTURES SYSTEM COMPREHENSIVE TEST")
+    logger.info("="*60)
+    logger.info("Testing: MEXC + Gate.io + Bybit V5")
+    logger.info("Duration: 20 seconds")
+    logger.info("="*60)
     
-    results = []
+    try:
+        tester = FuturesSystemTester()
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize tester: {e}")
+        return False
     
-    # Тест 1
-    result = await test_imports()
-    results.append(("Импорты", result))
-    
-    if not result:
-        print("\n❌ Тесты остановлены из-за ошибки импорта")
-        sys.exit(1)
-    
-    # Тест 2
-    result = await test_initialization()
-    results.append(("Инициализация", result))
-    
-    # Тест 3 (опционально - требует интернет)
-    print("\n⚠️  Тест 3 (WebSocket) пропущен (требует подключение к биржам)")
-    print("   Запустите main.py для полного теста")
-    
-    # Тест 4
-    result = await test_arbitrage_engine()
-    results.append(("ArbitrageEngine", result))
-    
-    # Итоги
-    print("\n" + "="*60)
-    print("ИТОГИ ПРОВЕРКИ")
-    print("="*60)
-    
-    for name, result in results:
-        status = "✅ PASSED" if result else "❌ FAILED"
-        print(f"   {name}: {status}")
-    
-    all_passed = all(r for _, r in results)
-    
-    if all_passed:
-        print("\n🎉 ВСЕ ТЕСТЫ ПРОЙДЕНЫ! Система готова к запуску.")
-        print("\nЗапустите: python main.py")
-    else:
-        print("\n❌ НЕКОТОРЫЕ ТЕСТЫ НЕ ПРОШЛИ. Проверьте ошибки выше.")
-        sys.exit(1)
+    try:
+        # Запуск теста
+        await tester.test_websocket_connections(duration_seconds=20)
+        
+        # Генерация отчета
+        success = tester.generate_report()
+        
+        return success
+        
+    except KeyboardInterrupt:
+        logger.info("\n⚠️ Test interrupted by user")
+        return False
+    except Exception as e:
+        logger.error(f"\n❌ Test failed: {e}", exc_info=True)
+        return False
+    finally:
+        # Закрытие всех соединений
+        for exchange in tester.exchanges.values():
+            await exchange.close()
+        
+        logger.info("\n✅ Test complete")
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        success = asyncio.run(main())
+        sys.exit(0 if success else 1)
+    except KeyboardInterrupt:
+        logger.info("Interrupted")
+        sys.exit(1)

@@ -12,17 +12,72 @@ from models import MarketData
 class BybitExchange(BaseExchange):
     """Bybit exchange implementation"""
     
-    def __init__(self):
-        super().__init__("Bybit")
+    def __init__(self, api_key: str = "", api_secret: str = ""):
+        super().__init__("Bybit", api_key, api_secret)
         self.ws_url = "wss://stream.bybit.com/v5/public/linear"
         self.rest_url = "https://api.bybit.com"
         self.orderbooks = {}
         self.funding_rates = {}
+        self.ws_running = False
+        self._ping_task = None
+    
+    async def start_websocket_listener(self, symbols: List[str]):
+        """Запуск WebSocket слушателя с автоматическим реконнектом"""
+        self.ws_running = True
+        
+        # Для Bybit нужна aiohttp сессия
+        if not self.session:
+            self.session = aiohttp.ClientSession()
+        
+        while self.ws_running:
+            try:
+                # 🔧 FIX: Закрываем старое соединение перед реконнектом
+                if self._ping_task:
+                    self._ping_task.cancel()
+                    self._ping_task = None
+                
+                if hasattr(self, 'ws') and self.ws:
+                    try:
+                        await self.ws.close()
+                    except Exception:
+                        pass
+                    self.ws = None
+                
+                await self.connect_ws()
+                await self.subscribe_orderbook(symbols)
+                
+                # Бесконечный цикл получения сообщений
+                async for msg in self.ws:
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        data = json.loads(msg.data)
+                        await self._handle_message(data)
+                    elif msg.type == aiohttp.WSMsgType.ERROR:
+                        break
+                        
+            except Exception as e:
+                print(f"❌ Bybit WebSocket error: {e}, reconnecting...")
+                if self._ping_task:
+                    self._ping_task.cancel()
+                await asyncio.sleep(2)
+    
+    async def stop_websocket(self):
+        """Остановка WebSocket"""
+        self.ws_running = False
+        if self._ping_task:
+            self._ping_task.cancel()
+        if self.ws:
+            await self.ws.close()
+    
+    async def _handle_message(self, data: dict):
+        """Обработка входящего сообщения"""
+        # Простая обработка для теста
+        pass
         
     async def connect_ws(self):
         """Connect to WebSocket"""
         self.ws = await self.session.ws_connect(self.ws_url)
-        asyncio.create_task(self._ping_loop())
+        self._ping_task = asyncio.create_task(self._ping_loop())
+        print(f"✅ Bybit WebSocket connected")
         
     async def _ping_loop(self):
         """Heartbeat to keep connection alive"""

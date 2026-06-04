@@ -9,10 +9,10 @@ from rate_limiter import get_rate_limiter
 class BaseExchange(ABC):
     """Базовый интерфейс биржи"""
     
-    def __init__(self, name: str, api_key: str = None, api_secret: str = None):
+    def __init__(self, name: str, api_key: str = "", api_secret: str = ""):
         self.name = name
-        self.api_key = api_key
-        self.api_secret = api_secret
+        self.api_key = api_key if api_key else ""
+        self.api_secret = api_secret if api_secret else ""
         self.ws = None
         self.session = None
         self.rate_limiter = get_rate_limiter(name)  # Rate limiter для REST API
@@ -32,6 +32,23 @@ class BaseExchange(ABC):
     async def _rate_limited_request(self, coro):
         """Выполнить HTTP запрос с rate limiting"""
         return await self.rate_limiter.execute_with_retry(coro)
+    
+    async def start_websocket_listener(self, symbols: List[str]):
+        """
+        Запуск WebSocket слушателя (универсальный метод)
+        
+        Args:
+            symbols: Список символов для подписки
+        """
+        # Подключаемся к WebSocket
+        await self.connect_ws()
+        
+        # Подписываемся на символы
+        await self.subscribe_orderbook(symbols)
+        
+        # Запускаем фоновый listener (бесконечный цикл)
+        # Реализация зависит от конкретной биржи
+        pass
         
     @abstractmethod
     async def connect_ws(self):
