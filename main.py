@@ -28,6 +28,8 @@ from risk_manager import RiskManager
 from position_manager import PositionManager
 from strategy_selector import StrategySelector
 from utils import TelegramLogger
+from opportunity_analyzer import OpportunityAnalyzer
+from opportunity_config import OPPORTUNITY_CONFIG
 
 from config import (
     OPEN_THRESHOLD, MAX_OPEN_POSITIONS
@@ -118,6 +120,7 @@ class ArbitrageSystem:
         self.arbitrage_engine = ArbitrageEngine(max_workers=MAX_WORKERS)  # Параллельный движок
         self.trading_engine = TradingEngine(self.exchanges, demo_mode=self.demo_mode)
         self.risk_manager = RiskManager(initial_balance=self.initial_balance)
+        self.opportunity_analyzer = OpportunityAnalyzer(config=OPPORTUNITY_CONFIG)  # Net Edge Strategy
         
         # Динамический селектор стратегий
         self.strategy_selector = StrategySelector()
@@ -136,11 +139,11 @@ class ArbitrageSystem:
         
         mode_text = "DEMO" if self.demo_mode else "LIVE"
         print(f"   ✓ Все движки созданы ({mode_text} режим)")
-        print(f"   📊 Стратегия: DYNAMIC (выбирается по спреду)")
+        print(f"   📊 Стратегия: DYNAMIC (Net Edge)")
         print(f"   📊 Баланс: {self.initial_balance} USD")
         print(f"   📊 Размер позиции: {self.risk_manager.calculate_position_size()} USD (1/10 баланса)")
         print(f"   📊 Макс позиций: {MAX_OPEN_POSITIONS}")
-        print(f"   📊 Минимальный спред: {OPEN_THRESHOLD}%")
+        print(f"   📊 Min Net Edge: {OPPORTUNITY_CONFIG['MIN_NET_EDGE']}%")
         
         # Уведомление в Telegram
         await self.telegram.log_system_start(
@@ -218,15 +221,27 @@ class ArbitrageSystem:
             if opportunities and (current_time - last_opportunity_time) >= OPPORTUNITY_DISPLAY_INTERVAL:
                 last_opportunity_time = current_time
                 
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🎯 Найдено {len(opportunities)} возможностей:")
+                # Анализируем все opportunities с net edge strategy
+                analyzed_opportunities = []
+                for opp in opportunities[:TOP_OPPORTUNITIES * 2]:  # Анализируем больше для фильтрации
+                    analysis = self.opportunity_analyzer.analyze(opp)
+                    analyzed_opportunities.append(analysis)
                 
-                # Обрабатываем топ возможности
-                for opp in opportunities[:TOP_OPPORTUNITIES]:
-                    risk_check = self.risk_manager.check_opportunity(opp, market_data)
+                # Фильтруем одобренные
+                approved = [a for a in analyzed_opportunities if a.approved]
+                rejected = [a for a in analyzed_opportunities if not a.approved]
+                
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🎯 Найдено {len(opportunities)} возможностей, "
+                      f"✅ одобрено {len(approved)}, ❌ отклонено {len(rejected)}")
+                
+                # Показываем топ одобренных
+                for analysis in approved[:TOP_OPPORTUNITIES]:
+                    opp = analysis.pair
+                    risk_check = self.risk_manager.check_opportunity(opp, market_data, analysis)
                     
                     status = "✅" if risk_check["approved"] else "❌"
                     print(f"   {status} {opp.symbol}: {opp.exchange_long} ↔ {opp.exchange_short}")
-                    print(f"      Спред: {opp.spread:.3f}% | Funding: {opp.funding_diff:.4f}")
+                    print(f"      Gross: {analysis.gross_spread_pct:.3f}% → Net Edge: {analysis.net_edge_pct:.3f}%")
                     
                     if risk_check["approved"]:
                         # Повторная проверка спреда перед открытием (защита от схлопывания)
