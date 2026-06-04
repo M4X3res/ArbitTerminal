@@ -139,7 +139,8 @@ class FuturesSystemTester:
                             )
                         
                         # Проверка латентности данных
-                        latency_ms = time.time() * 1000 - market_data.timestamp_ms
+                        timestamp_ms = market_data.timestamp.timestamp() * 1000
+                        latency_ms = time.time() * 1000 - timestamp_ms
                         if latency_ms > 100:
                             logger.warning(
                                 f"   ⚠️ WARNING: High latency {latency_ms:.0f}ms for {symbol}"
@@ -169,7 +170,8 @@ class FuturesSystemTester:
                 logger.info(f"      Ask: {market_data.ask:.2f}")
                 logger.info(f"      Funding Rate: {market_data.funding_rate*100:.4f}%")
                 
-                latency = time.time() * 1000 - market_data.timestamp_ms
+                timestamp_ms = market_data.timestamp.timestamp() * 1000
+                latency = time.time() * 1000 - timestamp_ms
                 logger.info(f"      Latency: {latency:.0f}ms")
         
         # Проверка арбитражных возможностей

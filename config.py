@@ -33,9 +33,13 @@ MAX_LEVERAGE = 10
 MIN_LIQUIDITY_MULTIPLIER = 1.5
 
 # === TELEGRAM УВЕДОМЛЕНИЯ ===
+# ⚠️ ВАЖНО: Токен и chat_id должны быть в .env файле!
 # Получите ваш chat_id через @userinfobot в Telegram
-TELEGRAM_BOT_TOKEN = "7768319583:AAEV2q1mwmnkA9MHDDocKeWqirFNBYx3qdc"
-TELEGRAM_CHAT_ID = "865213607"    # Получите через @userinfobot (это НЕ токен бота!)
+# Пример .env:
+#   TELEGRAM_BOT_TOKEN=1234567890:ABCdef...
+#   TELEGRAM_CHAT_ID=123456789
+TELEGRAM_BOT_TOKEN = None  # Читается из .env
+TELEGRAM_CHAT_ID = None    # Читается из .env
 
 # Устаревшие (для совместимости)
 MAX_POSITION_SIZE = 1000

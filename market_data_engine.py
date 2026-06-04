@@ -105,55 +105,56 @@ class MarketDataEngine:
                 # Ограничиваем количество символов
                 exchange_symbols = exchange_symbols[:SYMBOLS_PER_EXCHANGE]
                 
-                await exchange.subscribe_orderbook(exchange_symbols)
-                await exchange.subscribe_funding_rate(exchange_symbols)
+                # 🔧 FIX: Запускаем полноценный WebSocket listener (читает сообщения в фоне)
+                listener_task = asyncio.create_task(
+                    exchange.start_websocket_listener(exchange_symbols)
+                )
+                self._tasks.append(listener_task)
                 
                 print(f"   ✓ {name}: подписка на {len(exchange_symbols)} пар")
                 
-                # Запускаем фоновый слушатель
-                task = asyncio.create_task(self._listen_exchange(name, exchange))
-                self._tasks.append(task)
+                # Запускаем фоновый poll'er для агрегации данных в MarketDataEngine
+                poll_task = asyncio.create_task(self._listen_exchange(name, exchange))
+                self._tasks.append(poll_task)
         except Exception as e:
             print(f"   ✗ {name}: ошибка подписки - {e}")
     
     async def _listen_exchange(self, name: str, exchange):
-        """Непрерывное чтение накопленных данных с биржи"""
+        """Непрерывное чтение накопленных данных с биржи (poll режим)"""
+        reconnect_delay = 1  # Начальная задержка при ошибке
+        max_reconnect_delay = 60  # Максимальная задержка
+        
         while True:
             try:
                 await asyncio.sleep(0.1)  # Опрос каждые 100ms
                 
                 # Читаем все доступные символы из локального хранилища
+                # Exchange adapters сами читают WebSocket и заполняют orderbooks/funding_rates
                 for symbol in list(exchange.orderbooks.keys()):
-                    if symbol in exchange.funding_rates:
-                        # Получаем готовые данные
-                        data = await exchange.get_market_data(symbol)
-                        
-                        if data is None:
-                            continue
-                        
-                        normalized = data.symbol.replace("-", "").replace("_", "").replace("/", "").upper()
-                        self.market_data[name][normalized] = data
-                        
-                        # Отправляем в очередь для обработки
-                        try:
-                            self.data_queue.put_nowait(data)
-                        except asyncio.QueueFull:
-                            pass
-                        
-                        # Уведомляем слушателей
-                        for listener in self.listeners:
-                            asyncio.create_task(listener(data))
+                    # Получаем готовые данные (orderbook уже обновлен через WebSocket)
+                    data = await exchange.get_market_data(symbol)
+                    
+                    if data is None:
+                        continue
+                    
+                    normalized = data.symbol.replace("-", "").replace("_", "").replace("/", "").upper()
+                    self.market_data[name][normalized] = data
+                    
+                    # Отправляем в очередь для обработки
+                    try:
+                        self.data_queue.put_nowait(data)
+                    except asyncio.QueueFull:
+                        pass
+                    
+                    # Уведомляем слушателей
+                    for listener in self.listeners:
+                        asyncio.create_task(listener(data))
+                
+                # Сбрасываем задержку при успешной обработке
+                reconnect_delay = 1
                     
             except Exception as e:
-                print(f"   ⚠️  {name}: {e}")
-                await asyncio.sleep(1)
-                
-                # Автоматическое переподключение
-                try:
-                    await exchange.connect_ws()
-                except:
-                    pass
-                
+                print(f"   ⚠️  {name} polling error: {e}")
                 await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
     

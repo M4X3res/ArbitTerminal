@@ -16,7 +16,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from env_loader import get_api_keys
+from env_loader import get_api_keys, get_telegram_config
 from exchanges.mexc import MEXCExchange
 from exchanges.gate import GateExchange
 from exchanges.bybit import BybitExchange
@@ -30,8 +30,7 @@ from strategy_selector import StrategySelector
 from utils import TelegramLogger
 
 from config import (
-    OPEN_THRESHOLD, MAX_OPEN_POSITIONS,
-    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+    OPEN_THRESHOLD, MAX_OPEN_POSITIONS
 )
 
 # Стратегия выбирается динамически
@@ -123,8 +122,9 @@ class ArbitrageSystem:
         # Динамический селектор стратегий
         self.strategy_selector = StrategySelector()
         
-        # Telegram logger
-        self.telegram = TelegramLogger(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+        # Telegram logger (загрузка из .env)
+        telegram_bot_token, telegram_chat_id = get_telegram_config()
+        self.telegram = TelegramLogger(telegram_bot_token, telegram_chat_id)
         
         # Position Manager
         self.position_manager = PositionManager(

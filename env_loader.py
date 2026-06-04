@@ -27,3 +27,19 @@ def get_api_keys(exchange: str):
     secret = os.getenv(f'{exchange.upper()}_API_SECRET')
     
     return key, secret
+
+
+def get_telegram_config():
+    """Получение Telegram конфигурации"""
+    load_env()
+    
+    bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+    chat_id = os.getenv('TELEGRAM_CHAT_ID')
+    
+    # Пустые строки трактуем как None
+    if bot_token == '':
+        bot_token = None
+    if chat_id == '':
+        chat_id = None
+    
+    return bot_token, chat_id

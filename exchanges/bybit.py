@@ -13,7 +13,7 @@ class BybitExchange(BaseExchange):
     """Bybit exchange implementation"""
     
     def __init__(self, api_key: str = "", api_secret: str = ""):
-        super().__init__("Bybit", api_key, api_secret)
+        super().__init__("bybit", api_key, api_secret)  # Lowercase для совместимости с config
         self.ws_url = "wss://stream.bybit.com/v5/public/linear"
         self.rest_url = "https://api.bybit.com"
         self.orderbooks = {}
