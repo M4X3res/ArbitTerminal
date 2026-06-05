@@ -78,7 +78,19 @@ OPEN_THRESHOLD = 5.0   # минимальный спред
 python test_system.py
 ```
 
-### 4. Запуск
+### 4. Сбор данных (РЕКОМЕНДУЕТСЯ перед live)
+
+```bash
+# Собрать статистику спредов 2-3 суток
+python data_collector.py 72
+
+# Проанализировать результаты
+python data_analyzer.py data_collection/spreads_*.csv
+```
+
+См. [docs/DATA_COLLECTION_GUIDE.md](docs/DATA_COLLECTION_GUIDE.md) для деталей.
+
+### 5. Запуск
 
 ```bash
 # Demo режим (симуляция торговли)
@@ -170,6 +182,7 @@ PositionManager (автозакрытие по стратегии)
 | [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) | Структура проекта |
 | [docs/QUICK_START.md](docs/QUICK_START.md) | Быстрый старт |
 | [docs/LIVE_TRADING.md](docs/LIVE_TRADING.md) | Переход на live |
+| [docs/REST_TRADING_GUIDE.md](docs/REST_TRADING_GUIDE.md) | **REST торговля — реальность и оптимизация** |
 | [docs/STRATEGY_COMPARISON.md](docs/STRATEGY_COMPARISON.md) | Сравнение стратегий |
 | [docs/PERFORMANCE.md](docs/PERFORMANCE.md) | Оптимизация |
 | [docs/CHECKLIST.md](docs/CHECKLIST.md) | Чек-лист проверки |

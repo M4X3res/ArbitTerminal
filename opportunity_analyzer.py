@@ -27,16 +27,17 @@ class OpportunityAnalyzer:
     def __init__(self, config: dict = None):
         self.config = config or {}
         
-        # Thresholds
-        self.MIN_GROSS_SPREAD = self.config.get('MIN_GROSS_SPREAD', 0.35)
-        self.MIN_NET_EDGE = self.config.get('MIN_NET_EDGE', 0.15)
-        self.MAX_GROSS_SPREAD = self.config.get('MAX_GROSS_SPREAD', 2.5)
-        self.MAX_BID_ASK_SPREAD_PER_LEG = self.config.get('MAX_BID_ASK_SPREAD_PER_LEG', 0.12)
-        self.MAX_DATA_AGE_MS = self.config.get('MAX_DATA_AGE_MS', 1000)
+        # Thresholds (ужесточены для REST реальности)
+        self.MIN_GROSS_SPREAD = self.config.get('MIN_GROSS_SPREAD', 1.0)  # 1% минимум
+        self.MIN_NET_EDGE = self.config.get('MIN_NET_EDGE', 0.3)  # 0.3% чистой прибыли
+        self.MAX_GROSS_SPREAD = self.config.get('MAX_GROSS_SPREAD', 3.0)  # до 3% (было 5.0)
+        self.MAX_BID_ASK_SPREAD_PER_LEG = self.config.get('MAX_BID_ASK_SPREAD_PER_LEG', 0.15)
+        self.MAX_DATA_AGE_MS = self.config.get('MAX_DATA_AGE_MS', 500)  # 500ms max
         
-        # Trading parameters
+        # Trading parameters (реалистичные для REST)
         self.TAKER_FEE_PCT = self.config.get('TAKER_FEE_PCT', 0.05)  # 0.05% per side
-        self.SLIPPAGE_PCT = self.config.get('SLIPPAGE_PCT', 0.02)   # 0.02% per side
+        self.SLIPPAGE_PCT = self.config.get('SLIPPAGE_PCT', 0.05)   # 0.05% per side (REST реальность)
+        self.REST_EXECUTION_BUFFER = self.config.get('REST_EXECUTION_BUFFER', 0.1)  # 0.1% буфер на REST задержку
     
     def analyze(self, opportunity: ArbitragePair) -> OpportunityAnalysis:
         """Полный анализ арбитражной возможности"""
@@ -60,7 +61,7 @@ class OpportunityAnalyzer:
         # Предполагаем удержание ~8 часов (1 funding period)
         funding_adjustment_pct = abs(funding_long - funding_short) * 100
         
-        # 6. Net edge
+        # 6. Net edge (добавляем REST execution buffer)
         net_edge_pct = (
             gross_spread_pct 
             - estimated_fees_pct 
@@ -68,6 +69,7 @@ class OpportunityAnalyzer:
             - bid_ask_long 
             - bid_ask_short 
             - funding_adjustment_pct
+            - self.REST_EXECUTION_BUFFER  # Буфер на REST задержку
         )
         
         # 7. Data age
@@ -141,19 +143,25 @@ class OpportunityAnalyzer:
         if gross_spread < self.MIN_GROSS_SPREAD:
             return False, f"Gross spread too low ({gross_spread:.3f}% < {self.MIN_GROSS_SPREAD}%)"
         
-        # Check 3: Gross spread too high (anomaly)
+        # Check 3: Gross spread too high (anomaly / trap)
         if gross_spread > self.MAX_GROSS_SPREAD:
-            return False, f"Gross spread anomaly ({gross_spread:.3f}% > {self.MAX_GROSS_SPREAD}%)"
+            return False, f"Gross spread suspicious ({gross_spread:.3f}% > {self.MAX_GROSS_SPREAD}%) - likely stale/halted"
         
-        # Check 4: Bid-ask spread too wide on long leg
+        # Check 4: High spread extra validation (5%+)
+        if gross_spread > 5.0:
+            # Высокие спреды требуют свежих данных
+            if data_age_ms > 200:
+                return False, f"High spread with old data ({gross_spread:.3f}%, age {data_age_ms:.0f}ms)"
+        
+        # Check 5: Bid-ask spread too wide on long leg
         if bid_ask_long > self.MAX_BID_ASK_SPREAD_PER_LEG:
             return False, f"Bid-ask too wide on long leg ({bid_ask_long:.3f}% > {self.MAX_BID_ASK_SPREAD_PER_LEG}%)"
         
-        # Check 5: Bid-ask spread too wide on short leg
+        # Check 6: Bid-ask spread too wide on short leg
         if bid_ask_short > self.MAX_BID_ASK_SPREAD_PER_LEG:
             return False, f"Bid-ask too wide on short leg ({bid_ask_short:.3f}% > {self.MAX_BID_ASK_SPREAD_PER_LEG}%)"
         
-        # Check 6: Net edge insufficient
+        # Check 7: Net edge insufficient
         if net_edge < self.MIN_NET_EDGE:
             return False, f"Net edge insufficient ({net_edge:.3f}% < {self.MIN_NET_EDGE}%)"
         

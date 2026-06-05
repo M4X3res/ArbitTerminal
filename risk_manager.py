@@ -87,12 +87,40 @@ class RiskManager:
         if position_size < min_required:
             return {"approved": False, "reason": f"Position size ${position_size:.2f} below exchange minimum ${min_required}"}
         
+        # 6. Проверка ликвидности (orderbook depth)
+        liquidity_check = self._check_liquidity(opportunity, market_data, position_size)
+        if not liquidity_check["approved"]:
+            return liquidity_check
+        
         # ✅ Одобрено
         return {
             "approved": True,
             "reason": "All checks passed",
             "position_size": position_size
         }
+    
+    def _check_liquidity(self, opportunity: ArbitragePair, market_data: Dict, position_size: float) -> Dict:
+        """Проверка достаточной ликвидности в orderbook"""
+        long_data = market_data.get(opportunity.exchange_long, {}).get(opportunity.symbol)
+        short_data = market_data.get(opportunity.exchange_short, {}).get(opportunity.symbol)
+        
+        if not long_data or not short_data:
+            return {"approved": False, "reason": "Missing market data"}
+        
+        # Проверяем volume (если доступен)
+        # Для LONG нужно купить по ask, для SHORT — продать по bid
+        if hasattr(long_data, 'volume') and long_data.volume > 0:
+            # Требуем минимум 3x от размера нашей позиции
+            min_volume_required = position_size * 3
+            if long_data.volume < min_volume_required:
+                return {"approved": False, "reason": f"Low liquidity on {opportunity.exchange_long} (volume ${long_data.volume:.0f} < ${min_volume_required:.0f})"}
+        
+        if hasattr(short_data, 'volume') and short_data.volume > 0:
+            min_volume_required = position_size * 3
+            if short_data.volume < min_volume_required:
+                return {"approved": False, "reason": f"Low liquidity on {opportunity.exchange_short} (volume ${short_data.volume:.0f} < ${min_volume_required:.0f})"}
+        
+        return {"approved": True, "reason": "Sufficient liquidity"}
     
     def register_position(self, symbol: str, exchange_long: str, exchange_short: str):
         """Регистрация открытой позиции"""

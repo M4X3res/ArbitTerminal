@@ -46,7 +46,8 @@ class ArbitrageEngine:
                     symbol=symbol, spread=spread1,
                     funding_diff=data_short.funding_rate - data_long.funding_rate,
                     price_long=data_long.ask, price_short=data_short.bid,
-                    timestamp=datetime.now()
+                    timestamp=datetime.now(),
+                    data_long=data_long, data_short=data_short
                 )
                 opportunities.append(opp)
                 with self.stats_lock:
@@ -60,7 +61,8 @@ class ArbitrageEngine:
                     symbol=symbol, spread=spread2,
                     funding_diff=data_long.funding_rate - data_short.funding_rate,
                     price_long=data_short.ask, price_short=data_long.bid,
-                    timestamp=datetime.now()
+                    timestamp=datetime.now(),
+                    data_long=data_short, data_short=data_long
                 )
                 opportunities.append(opp)
                 with self.stats_lock:
@@ -134,7 +136,9 @@ class ArbitrageEngine:
                     funding_diff=data_short.funding_rate - data_long.funding_rate,
                     price_long=data_long.ask,
                     price_short=data_short.bid,
-                    timestamp=datetime.now()
+                    timestamp=datetime.now(),
+                    data_long=data_long,
+                    data_short=data_short
                 )
                 opportunities.append(opp)
                 with self.stats_lock:
@@ -153,7 +157,9 @@ class ArbitrageEngine:
                     funding_diff=data_long.funding_rate - data_short.funding_rate,
                     price_long=data_short.ask,
                     price_short=data_long.bid,
-                    timestamp=datetime.now()
+                    timestamp=datetime.now(),
+                    data_long=data_short,
+                    data_short=data_long
                 )
                 opportunities.append(opp)
                 with self.stats_lock:

@@ -3,16 +3,26 @@
 # Биржи (3 working exchanges)
 EXCHANGES = ['mexc', 'gate', 'bybit']
 
-# === СТРАТЕГИЯ ОТКРЫТИЯ ===
-# Стратегия выбирается АВТОМАТИЧЕСКИ по размеру спреда:
-# - 0.7-2%: amplitude (быстрый скальпинг)
-# - 2-5%: balanced (средняя)
-# - 5%+: collapse (схлопывание)
+# === СТРАТЕГИЯ ОТКРЫТИЯ (REST-оптимизировано) ===
+# Для REST торговли требуются более высокие спреды
+# из-за задержек исполнения (100-300ms на 2 ордера)
 
-OPEN_THRESHOLD = 0.7  # Минимальный спред для открытия
-MAX_SPREAD_OPEN = 15.0  # Максимальный спред
+OPEN_THRESHOLD = 1.0  # Минимальный спред для открытия
+MAX_SPREAD_OPEN = 3.0  # Максимальный спред (выше — вероятно ловушка)
+MIN_NET_EDGE = 0.3     # Минимальная чистая прибыль после всех издержек
 
-# === СТРАТЕГИЯ ЗАКРЫТИЯ ===
+# Aggressive mode (использовать с осторожностью!)
+AGGRESSIVE_MODE = False
+AGGRESSIVE_MAX_SPREAD = 5.0  # Если True, макс спред 5% вместо 3%
+
+# === СТРАТЕГИЯ ЗАКРЫТИЯ (REST-оптимизировано) ===
+STRATEGY_TYPE = 'rest_optimized'  # 'amplitude', 'collapse', или 'rest_optimized'
+
+# REST Optimized Strategy (рекомендуется для REST торговли)
+REST_TAKE_PROFIT_PCT = 0.4    # Фиксированный TP: 0.4% (с 5x = 2% ROI)
+REST_STOP_LOSS_PCT = 0.5      # Фиксированный SL: 0.5% (с 5x = 2.5% убыток от margin)
+REST_MAX_HOLD_TIME = 180      # 3 минуты максимум
+REST_TRAILING_ACTIVATION = 0.5  # Трейлинг после 0.5% прибыли
 # Amplitude Strategy
 AMPLITUDE_WINDOW = 50
 AMPLITUDE_THRESHOLD = 0.7
@@ -26,10 +36,12 @@ MIN_PROFIT_PCT = 0.05        # Минимальная прибыль 0.05%
 MAX_HOLD_TIME_COLLAPSE = 3600  # 1 час
 
 # === РИСК-МЕНЕДЖМЕНТ ===
-POSITION_SIZE_FRACTION = 0.1
-MAX_OPEN_POSITIONS = 3  # Максимум 3 позиции одновременно (на всех биржах)
+POSITION_SIZE_FRACTION = 0.1    # 10% от баланса на позицию
+MAX_OPEN_POSITIONS = 3          # Максимум 3 позиции одновременно
 MAX_POSITIONS_PER_EXCHANGE = 3  # Максимум 3 позиции на одной бирже
-MAX_LEVERAGE = 10
+MAX_LEVERAGE = 5                # Плечо 5x (было 10x - снижено для безопасности)
+                                # При 10x: риск ликвидации -10%, прибыль выше в 2 раза
+                                # При 5x: риск ликвидации -20%, баланс риск/прибыль ✅
 MIN_LIQUIDITY_MULTIPLIER = 1.5
 
 # === TELEGRAM УВЕДОМЛЕНИЯ ===

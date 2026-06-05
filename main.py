@@ -224,8 +224,12 @@ class ArbitrageSystem:
                 # Анализируем все opportunities с net edge strategy
                 analyzed_opportunities = []
                 for opp in opportunities[:TOP_OPPORTUNITIES * 2]:  # Анализируем больше для фильтрации
-                    analysis = self.opportunity_analyzer.analyze(opp)
-                    analyzed_opportunities.append(analysis)
+                    try:
+                        analysis = self.opportunity_analyzer.analyze(opp)
+                        analyzed_opportunities.append(analysis)
+                    except Exception as e:
+                        print(f"⚠️ Ошибка анализа {opp.symbol}: {e}")
+                        continue
                 
                 # Фильтруем одобренные
                 approved = [a for a in analyzed_opportunities if a.approved]

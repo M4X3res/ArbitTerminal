@@ -37,6 +37,8 @@ class ArbitragePair:
     price_long: float
     price_short: float
     timestamp: datetime
+    data_long: 'MarketData' = None
+    data_short: 'MarketData' = None
 
 
 @dataclass
