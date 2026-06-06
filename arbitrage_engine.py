@@ -25,8 +25,9 @@ class ArbitrageEngine:
         raw_spread = (short_data.bid - long_data.ask) / long_data.ask * 100
         
         # Разница funding rates (платим на шорт, получаем на лонг)
-        # Funding rate уже в формате 0.0001 = 0.01%, умножаем на 100 для перевода в %
-        funding_diff = (short_data.funding_rate - long_data.funding_rate) * 100
+        # Funding rate уже в процентах! (0.0001 = 0.01%)
+        # Не умножаем на 100, т.к. спред тоже в процентах
+        funding_diff = short_data.funding_rate - long_data.funding_rate
         
         # Эффективный спред (funding начисляется раз в 8 часов, для коротких позиций не учитываем)
         effective = raw_spread - funding_diff
@@ -185,4 +186,13 @@ class ArbitrageEngine:
             "avg_spread": sum(self.stats["spreads"]) / len(self.stats["spreads"]),
             "max_spread": max(self.stats["spreads"])
         }
+    
+    def shutdown(self):
+        """Закрытие ThreadPoolExecutor"""
+        if hasattr(self, 'executor'):
+            self.executor.shutdown(wait=False)
+    
+    def __del__(self):
+        """Автоматическое закрытие при удалении объекта"""
+        self.shutdown()
 

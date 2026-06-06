@@ -272,7 +272,7 @@ class ArbitrageSystem:
                         if success:
                             trade = self.trading_engine.get_position(pair_id)
                             self.position_manager.register_position(trade)
-                            self.risk_manager.register_position(opp.symbol, opp.exchange_long, opp.exchange_short)
+                            self.risk_manager.register_position(pair_id, opp.symbol, opp.exchange_long, opp.exchange_short)
                             
                             print(f"      ✅ Позиция открыта: {pair_id[:8]}... (стратегия: {strategy_name})")
                             
@@ -345,11 +345,28 @@ class ArbitrageSystem:
         """Очистка ресурсов"""
         print("\n🧹 Завершение работы...")
         
+        # Закрываем открытые позиции
+        if self.position_manager and self.position_manager.positions:
+            open_count = len(self.position_manager.positions)
+            print(f"⚠️  Закрытие {open_count} открытых позиций...")
+            
+            for pair_id in list(self.position_manager.positions.keys()):
+                trade = self.position_manager.positions[pair_id]
+                await self.telegram.log_risk_warning(
+                    "Emergency Close", 
+                    f"{trade.symbol}: система остановлена с открытой позицией"
+                )
+                await self.trading_engine.close_position(pair_id)
+        
         # Останавливаем слушателей
         if self.market_data_engine:
             await self.market_data_engine.stop()
         
-        # Закрываем ThreadPoolExecutor
+        # Закрываем ArbitrageEngine ThreadPoolExecutor
+        if hasattr(self, 'arbitrage_engine'):
+            self.arbitrage_engine.shutdown()
+        
+        # Закрываем ThreadPoolExecutor в main
         if hasattr(self, 'executor'):
             self.executor.shutdown(wait=False)
         

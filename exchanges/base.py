@@ -18,6 +18,14 @@ class BaseExchange(ABC):
         self.session = None
         self.rate_limiter = get_rate_limiter(name)  # Rate limiter для REST API
     
+    def to_canonical(self, exchange_symbol: str) -> str:
+        """Конвертация биржевого символа в canonical формат (BTCUSDT)"""
+        return normalize_symbol(exchange_symbol)
+    
+    def to_local(self, canonical: str) -> str:
+        """Конвертация canonical в формат этой биржи"""
+        return to_exchange_symbol(canonical, self.name)
+    
     async def initialize(self):
         """Инициализация HTTP сессии и WebSocket"""
         self.session = aiohttp.ClientSession()

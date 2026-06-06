@@ -69,12 +69,12 @@ class GateExchange(BaseExchange):
             await self.ws.close()
     
     def _normalize_symbol(self, symbol: str) -> str:
-        """Нормализация символа к виду BTC/USDT"""
-        return symbol.replace("_", "/")
+        """Нормализация символа к canonical формату BTCUSDT"""
+        return self.to_canonical(symbol)
     
     def _exchange_format_symbol(self, symbol: str) -> str:
-        """Конвертация BTC/USDT в формат биржи BTC_USDT"""
-        return symbol.replace("/", "_")
+        """Конвертация BTCUSDT в формат биржи BTC_USDT"""
+        return self.to_local(symbol)
     
     async def _handle_message(self, data: dict):
         """Обработка входящего сообщения"""
@@ -178,7 +178,7 @@ class GateExchange(BaseExchange):
         return None
     
     async def get_instruments(self) -> List[str]:
-        """Получение списка торговых инструментов"""
+        """Получение списка торговых инструментов (возвращает canonical формат)"""
         import aiohttp
         
         async with aiohttp.ClientSession() as session:
@@ -186,7 +186,9 @@ class GateExchange(BaseExchange):
                 data = await resp.json()
                 
                 if isinstance(data, list):
-                    self.instruments = [item["name"] for item in data if not item.get("in_delisting")]
+                    # Gate возвращает BTC_USDT → нормализуем в BTCUSDT
+                    raw_symbols = [item["name"] for item in data if not item.get("in_delisting")]
+                    self.instruments = [self.to_canonical(s) for s in raw_symbols]
                     return self.instruments
                 
                 return []
@@ -209,11 +211,27 @@ class GateExchange(BaseExchange):
         if not self.api_key or not self.api_secret:
             raise ValueError("API credentials required")
         
+        from order_utils import calculate_order_qty, map_order_side
+        
+        # Получаем текущую цену
+        current_price = self.orderbooks.get(symbol, {}).get("ask" if side == "LONG" else "bid", 0)
+        if not current_price:
+            raise ValueError(f"No market data for {symbol}")
+        
+        # Правильный расчёт количества
+        qty = calculate_order_qty(symbol, size, current_price, leverage=5)
+        
+        # Маппинг стороны ордера (Gate: 1=buy, -1=sell)
+        side_multiplier = map_order_side('gate', side, is_close=False)
+        
+        # Конвертируем symbol в формат биржи
+        exchange_symbol = self._exchange_format_symbol(symbol)
+        
         settle = "usdt"
         url = f"/api/v4/futures/{settle}/orders"
         body = json.dumps({
-            "contract": symbol,
-            "size": int(size) if side.lower() == "buy" else -int(size),
+            "contract": exchange_symbol,
+            "size": int(qty * side_multiplier),  # Положительное для buy, отрицательное для sell
             "price": "0",
             "tif": "ioc"
         })
@@ -235,8 +253,11 @@ class GateExchange(BaseExchange):
         if not self.api_key or not self.api_secret:
             raise ValueError("API credentials required")
         
+        # Конвертируем symbol в формат биржи
+        exchange_symbol = self._exchange_format_symbol(symbol)
+        
         settle = "usdt"
-        url = f"/api/v4/futures/{settle}/positions/{symbol}/close"
+        url = f"/api/v4/futures/{settle}/positions/{exchange_symbol}/close"
         body = json.dumps({})
         
         headers = self._sign_gate("POST", url, "", body)

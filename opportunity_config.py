@@ -1,11 +1,14 @@
 """Конфигурация для Opportunity Analyzer"""
 
+# Импортируем пороги из главного конфига для синхронизации
+from config import OPEN_THRESHOLD, MAX_SPREAD_OPEN, MIN_NET_EDGE
+
 # Net Edge Strategy Thresholds
 OPPORTUNITY_CONFIG = {
-    # Spread thresholds
-    'MIN_GROSS_SPREAD': 0.35,      # Минимальный gross spread (%)
-    'MIN_NET_EDGE': 0.15,          # Минимальный net edge после всех издержек (%)
-    'MAX_GROSS_SPREAD': 2.5,       # Максимальный gross spread (аномалия) (%)
+    # Spread thresholds (синхронизировано с config.py)
+    'MIN_GROSS_SPREAD': OPEN_THRESHOLD,   # = 1.0%
+    'MIN_NET_EDGE': MIN_NET_EDGE,         # = 0.3%
+    'MAX_GROSS_SPREAD': MAX_SPREAD_OPEN,  # = 3.0%
     
     # Market quality
     'MAX_BID_ASK_SPREAD_PER_LEG': 0.12,  # Максимальный bid-ask spread на одну позицию (%)

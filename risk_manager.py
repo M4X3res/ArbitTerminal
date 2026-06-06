@@ -23,7 +23,7 @@ class RiskManager:
     
     def __init__(self, initial_balance: float = 1000):
         self.balance = initial_balance
-        self.open_positions = []
+        self.open_positions: Dict[str, dict] = {}  # {pair_id: {symbol, exchange_long, exchange_short}}
         self.positions_per_exchange = {}  # Подсчет позиций по биржам
     
     def calculate_position_size(self) -> float:
@@ -122,28 +122,34 @@ class RiskManager:
         
         return {"approved": True, "reason": "Sufficient liquidity"}
     
-    def register_position(self, symbol: str, exchange_long: str, exchange_short: str):
+    def register_position(self, pair_id: str, symbol: str, exchange_long: str, exchange_short: str):
         """Регистрация открытой позиции"""
-        self.open_positions.append(symbol)
+        self.open_positions[pair_id] = {
+            'symbol': symbol,
+            'exchange_long': exchange_long,
+            'exchange_short': exchange_short,
+        }
         # Увеличиваем счетчики для обеих бирж
         self.positions_per_exchange[exchange_long] = self.positions_per_exchange.get(exchange_long, 0) + 1
         self.positions_per_exchange[exchange_short] = self.positions_per_exchange.get(exchange_short, 0) + 1
     
-    def unregister_position(self, symbol: str, exchange_long: str = None, exchange_short: str = None):
+    def unregister_position(self, pair_id: str):
         """Удаление закрытой позиции"""
-        if symbol in self.open_positions:
-            self.open_positions.remove(symbol)
+        if pair_id not in self.open_positions:
+            return
+        
+        pos = self.open_positions.pop(pair_id)
         
         # Уменьшаем счетчики для бирж
-        if exchange_long and exchange_long in self.positions_per_exchange:
-            self.positions_per_exchange[exchange_long] -= 1
-            if self.positions_per_exchange[exchange_long] <= 0:
-                del self.positions_per_exchange[exchange_long]
-        
-        if exchange_short and exchange_short in self.positions_per_exchange:
-            self.positions_per_exchange[exchange_short] -= 1
-            if self.positions_per_exchange[exchange_short] <= 0:
-                del self.positions_per_exchange[exchange_short]
+        for ex in [pos['exchange_long'], pos['exchange_short']]:
+            if ex in self.positions_per_exchange:
+                self.positions_per_exchange[ex] = max(0, self.positions_per_exchange[ex] - 1)
+                if self.positions_per_exchange[ex] == 0:
+                    del self.positions_per_exchange[ex]
+    
+    def get_open_count(self) -> int:
+        """Получить количество открытых позиций"""
+        return len(self.open_positions)
     
     def update_balance(self, pnl: float):
         """Обновление баланса после закрытия позиции"""

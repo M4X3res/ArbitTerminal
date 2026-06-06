@@ -69,12 +69,12 @@ class MEXCExchange(BaseExchange):
             await self.ws.close()
     
     def _normalize_symbol(self, symbol: str) -> str:
-        """Нормализация символа к виду BTC/USDT"""
-        return symbol.replace("_", "/")
+        """Нормализация символа к canonical формату BTCUSDT"""
+        return self.to_canonical(symbol)
     
     def _exchange_format_symbol(self, symbol: str) -> str:
-        """Конвертация BTC/USDT в формат биржи BTC_USDT"""
-        return symbol.replace("/", "_")
+        """Конвертация BTCUSDT в формат биржи BTC_USDT"""
+        return self.to_local(symbol)
     
     async def _handle_message(self, data: dict):
         """Обработка входящего сообщения"""
@@ -156,7 +156,7 @@ class MEXCExchange(BaseExchange):
         return None
     
     async def get_instruments(self) -> List[str]:
-        """Получение списка торговых инструментов"""
+        """Получение списка торговых инструментов (возвращает canonical формат)"""
         import aiohttp
         
         async with aiohttp.ClientSession() as session:
@@ -164,7 +164,9 @@ class MEXCExchange(BaseExchange):
                 data = await resp.json()
                 
                 if data.get("success"):
-                    self.instruments = [item["symbol"] for item in data.get("data", [])]
+                    # MEXC возвращает BTC_USDT → нормализуем в BTCUSDT
+                    raw_symbols = [item["symbol"] for item in data.get("data", [])]
+                    self.instruments = [self.to_canonical(s) for s in raw_symbols]
                     return self.instruments
                 
                 return []
@@ -174,11 +176,27 @@ class MEXCExchange(BaseExchange):
         if not self.api_key or not self.api_secret:
             raise ValueError("API credentials required for trading")
         
+        from order_utils import calculate_order_qty, map_order_side
+        
+        # Получаем текущую цену
+        current_price = self.orderbooks.get(symbol, {}).get("ask" if side == "LONG" else "bid", 0)
+        if not current_price:
+            raise ValueError(f"No market data for {symbol}")
+        
+        # Правильный расчёт количества
+        qty = calculate_order_qty(symbol, size, current_price, leverage=5)
+        
+        # Маппинг стороны ордера
+        side_api = map_order_side('mexc', side, is_close=False)
+        
+        # Конвертируем symbol в формат биржи
+        exchange_symbol = self._exchange_format_symbol(symbol)
+        
         params = {
-            "symbol": symbol,
-            "side": 1 if side.lower() == "buy" else 2,  # 1=long, 2=short
-            "type": 5 if order_type == "market" else 1,  # 5=market, 1=limit
-            "vol": str(size),
+            "symbol": exchange_symbol,
+            "side": side_api,  # Используем правильный маппинг
+            "type": 5 if order_type == "market" else 1,
+            "vol": str(qty),  # Используем правильно рассчитанное количество
             "timestamp": get_timestamp_ms()
         }
         
@@ -201,8 +219,11 @@ class MEXCExchange(BaseExchange):
         if not self.api_key or not self.api_secret:
             raise ValueError("API credentials required for trading")
         
+        # Конвертируем symbol в формат биржи
+        exchange_symbol = self._exchange_format_symbol(symbol)
+        
         params = {
-            "symbol": symbol,
+            "symbol": exchange_symbol,
             "timestamp": get_timestamp_ms()
         }
         

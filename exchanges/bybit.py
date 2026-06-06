@@ -84,15 +84,12 @@ class BybitExchange(BaseExchange):
             await self.ws.close()
     
     def _normalize_symbol(self, symbol: str) -> str:
-        """Нормализация символа к виду BTC/USDT"""
-        # Bybit использует 'BTCUSDT' -> 'BTC/USDT'
-        if "USDT" in symbol and "/" not in symbol:
-            return symbol.replace("USDT", "/USDT")
-        return symbol
+        """Нормализация символа к canonical формату BTCUSDT"""
+        return self.to_canonical(symbol)
     
     def _exchange_format_symbol(self, symbol: str) -> str:
-        """Конвертация BTC/USDT в формат биржи BTCUSDT"""
-        return symbol.replace("/", "")
+        """Конвертация BTCUSDT в формат биржи BTCUSDT (для Bybit одинаково)"""
+        return self.to_local(symbol)
     
     async def _handle_message(self, data: dict):
         """Обработка входящего сообщения"""
@@ -146,7 +143,7 @@ class BybitExchange(BaseExchange):
                 await self.ws.send_json({"op": "ping"})
     
     async def get_instruments(self) -> List[str]:
-        """Get list of tradeable perpetual contracts"""
+        """Get list of tradeable perpetual contracts (возвращает canonical формат)"""
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -154,11 +151,13 @@ class BybitExchange(BaseExchange):
                     params={"category": "linear"}
                 ) as resp:
                     data = await resp.json()
-                    return [
+                    # Bybit уже возвращает BTCUSDT (canonical), но на всякий случай нормализуем
+                    raw_symbols = [
                         item["symbol"]
                         for item in data.get("result", {}).get("list", [])
                         if item.get("status") == "Trading"
                     ]
+                    return [self.to_canonical(s) for s in raw_symbols]
         except Exception as e:
             print(f"Bybit get_instruments error: {e}")
             return []
@@ -213,17 +212,33 @@ class BybitExchange(BaseExchange):
         if not self.api_key or not self.api_secret:
             raise ValueError("API credentials required")
         
+        from order_utils import calculate_order_qty, map_order_side
+        
+        # Получаем текущую цену
+        current_price = self.orderbooks.get(symbol, {}).get("ask" if side == "LONG" else "bid", 0)
+        if not current_price:
+            raise ValueError(f"No market data for {symbol}")
+        
+        # Правильный расчёт количества
+        qty = calculate_order_qty(symbol, size, current_price, leverage=5)
+        
+        # Маппинг стороны ордера (Bybit: Buy/Sell)
+        side_api = map_order_side('bybit', side, is_close=False)
+        
+        # Конвертируем symbol в формат биржи (для Bybit = canonical)
+        exchange_symbol = self._exchange_format_symbol(symbol)
+        
         async def _make_request():
             try:
                 timestamp = get_timestamp_ms()
                 
-                # Body для POST запроса (Bybit v5 использует JSON body, не query params)
+                # Body для POST запроса
                 body = {
                     "category": "linear",
-                    "symbol": symbol,
-                    "side": side.capitalize(),  # Buy/Sell
-                    "orderType": order_type.capitalize(),  # Market/Limit
-                    "qty": str(size)
+                    "symbol": exchange_symbol,
+                    "side": side_api,  # Используем правильный маппинг
+                    "orderType": order_type.capitalize(),
+                    "qty": str(qty)  # Используем правильно рассчитанное количество
                 }
                 
                 body_json = json.dumps(body)
@@ -265,11 +280,14 @@ class BybitExchange(BaseExchange):
         if not self.api_key or not self.api_secret:
             raise ValueError("API credentials required")
         
+        # Конвертируем symbol в формат биржи
+        exchange_symbol = self._exchange_format_symbol(symbol)
+        
         async def _make_request():
             timestamp = get_timestamp_ms()
             params = {
                 "category": "linear",
-                "symbol": symbol,
+                "symbol": exchange_symbol,
                 "timestamp": timestamp,
                 "recv_window": 5000
             }

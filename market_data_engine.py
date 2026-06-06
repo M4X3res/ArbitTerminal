@@ -120,35 +120,43 @@ class MarketDataEngine:
             print(f"   ✗ {name}: ошибка подписки - {e}")
     
     async def _listen_exchange(self, name: str, exchange):
-        """Непрерывное чтение накопленных данных с биржи (poll режим)"""
-        reconnect_delay = 1  # Начальная задержка при ошибке
-        max_reconnect_delay = 60  # Максимальная задержка
+        """Агрегация данных из WebSocket в MarketDataEngine"""
+        reconnect_delay = 1
+        max_reconnect_delay = 60
         
         while True:
             try:
-                await asyncio.sleep(0.1)  # Опрос каждые 100ms
+                await asyncio.sleep(0.1)  # Проверка каждые 100ms
                 
-                # Читаем все доступные символы из локального хранилища
-                # Exchange adapters сами читают WebSocket и заполняют orderbooks/funding_rates
-                for symbol in list(exchange.orderbooks.keys()):
-                    # Получаем готовые данные (orderbook уже обновлен через WebSocket)
-                    data = await exchange.get_market_data(symbol)
-                    
-                    if data is None:
-                        continue
-                    
-                    normalized = data.symbol.replace("-", "").replace("_", "").replace("/", "").upper()
-                    self.market_data[name][normalized] = data
-                    
-                    # Отправляем в очередь для обработки
-                    try:
-                        self.data_queue.put_nowait(data)
-                    except asyncio.QueueFull:
-                        pass
-                    
-                    # Уведомляем слушателей
-                    for listener in self.listeners:
-                        asyncio.create_task(listener(data))
+                # Читаем данные напрямую из orderbooks (уже обновлены WebSocket)
+                for symbol, orderbook in list(exchange.orderbooks.items()):
+                    # Создаём MarketData из готовых данных
+                    if symbol in exchange.funding_rates:
+                        from datetime import datetime
+                        
+                        # Нормализуем символ к canonical формату
+                        canonical = symbol.replace("-", "").replace("_", "").replace("/", "").upper()
+                        
+                        data = MarketData(
+                            exchange=name,
+                            symbol=canonical,
+                            bid=orderbook["bid"],
+                            ask=orderbook["ask"],
+                            funding_rate=exchange.funding_rates[symbol],
+                            timestamp=datetime.now(),
+                        )
+                        
+                        self.market_data[name][canonical] = data
+                        
+                        # Отправляем в очередь для обработки
+                        try:
+                            self.data_queue.put_nowait(data)
+                        except asyncio.QueueFull:
+                            pass
+                        
+                        # Уведомляем слушателей
+                        for listener in self.listeners:
+                            asyncio.create_task(listener(data))
                 
                 # Сбрасываем задержку при успешной обработке
                 reconnect_delay = 1

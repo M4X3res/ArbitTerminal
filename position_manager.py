@@ -29,10 +29,14 @@ class PositionManager:
             return
         
         for pair_id, trade in list(self.positions.items()):
-            should_close, reason = self.strategy_selector.should_close(trade, market_data)
-            
-            if should_close:
-                await self.close_position(pair_id, market_data, reason)
+            try:
+                should_close, reason = self.strategy_selector.should_close(trade, market_data)
+                
+                if should_close:
+                    await self.close_position(pair_id, market_data, reason)
+            except Exception as e:
+                print(f"⚠️  Ошибка мониторинга позиции {trade.symbol}: {e}")
+                await self.telegram.log_error("Position Monitoring", f"{trade.symbol}: {str(e)}")
     
     async def close_position(self, pair_id: str, market_data: Dict, reason: str):
         """Закрытие позиции"""
@@ -48,18 +52,26 @@ class PositionManager:
         success = await self.trading_engine.close_position(pair_id)
         
         if success:
-            # Расчёт PnL
+            # Расчёт PnL с использованием pnl_calculator
+            from pnl_calculator import calculate_net_pnl
+            
             long_data = market_data.get(trade.exchange_long, {}).get(trade.symbol)
             short_data = market_data.get(trade.exchange_short, {}).get(trade.symbol)
             
             if long_data and short_data:
-                # PnL в процентах
-                pnl_long = (long_data.bid - trade.entry_price_long) / trade.entry_price_long * 100
-                pnl_short = (trade.entry_price_short - short_data.ask) / trade.entry_price_short * 100
-                pnl_pct = pnl_long + pnl_short
+                # Используем унифицированный расчёт PnL
+                pnl_result = calculate_net_pnl(
+                    entry_price_long=trade.entry_price_long,
+                    entry_price_short=trade.entry_price_short,
+                    current_price_long=long_data.bid,
+                    current_price_short=short_data.ask,
+                    position_size_usd=trade.position_size_usd,
+                    leverage=5,
+                    fee_rate=0.0005,
+                )
                 
-                # PnL в USD
-                pnl_usd = pnl_pct * trade.position_size_usd / 100
+                pnl_pct = pnl_result['gross_pct']
+                pnl_usd = pnl_result['net_usd']
                 
                 # Текущий спред
                 current_spread = (short_data.bid - long_data.ask) / long_data.ask * 100
@@ -79,7 +91,7 @@ class PositionManager:
                 if self.risk_manager:
                     self.risk_manager.update_balance(pnl_usd)
                     # Удаляем позицию из risk manager
-                    self.risk_manager.unregister_position(trade.symbol, trade.exchange_long, trade.exchange_short)
+                    self.risk_manager.unregister_position(pair_id)
                 
                 # Вывод
                 emoji = "✅" if pnl_usd > 0 else "❌"
