@@ -3,7 +3,7 @@ from typing import Dict
 from datetime import datetime
 from collections import deque
 import statistics
-from models import Trade, MarketData
+from core.models import Trade, MarketData
 
 
 class BalancedStrategy:
@@ -36,17 +36,26 @@ class BalancedStrategy:
     
     def calculate_amplitude(self, trade: Trade, market_data: Dict[str, Dict[str, MarketData]]) -> float:
         """Расчёт текущей амплитуды (PnL в USD)"""
+        from core.analyzers.pnl_calculator import calculate_net_pnl
+        
         long_data = market_data.get(trade.exchange_long, {}).get(trade.symbol)
         short_data = market_data.get(trade.exchange_short, {}).get(trade.symbol)
         
         if not long_data or not short_data:
             return 0.0
         
-        pnl_long = (long_data.bid - trade.entry_price_long) / trade.entry_price_long * 100
-        pnl_short = (trade.entry_price_short - short_data.ask) / trade.entry_price_short * 100
-        amplitude_pct = pnl_long + pnl_short
+        result = calculate_net_pnl(
+            entry_price_long=trade.entry_price_long,
+            entry_price_short=trade.entry_price_short,
+            current_price_long=long_data.bid,
+            current_price_short=short_data.ask,
+            position_size_usd=trade.position_size_usd,
+            leverage=getattr(trade, 'leverage', 10),
+            fee_rate=0.0005
+        )
         
-        return amplitude_pct * trade.position_size_usd / 100
+        return result['net_usd']
+
     
     def calculate_current_spread(self, trade: Trade, market_data: Dict[str, Dict[str, MarketData]]) -> float:
         """Расчёт текущего спреда"""
@@ -60,16 +69,26 @@ class BalancedStrategy:
     
     def calculate_pnl_pct(self, trade: Trade, market_data: Dict[str, Dict[str, MarketData]]) -> float:
         """Расчёт PnL в %"""
+        from core.analyzers.pnl_calculator import calculate_net_pnl
+        
         long_data = market_data.get(trade.exchange_long, {}).get(trade.symbol)
         short_data = market_data.get(trade.exchange_short, {}).get(trade.symbol)
         
         if not long_data or not short_data:
             return 0.0
         
-        pnl_long = (long_data.bid - trade.entry_price_long) / trade.entry_price_long * 100
-        pnl_short = (trade.entry_price_short - short_data.ask) / trade.entry_price_short * 100
+        result = calculate_net_pnl(
+            entry_price_long=trade.entry_price_long,
+            entry_price_short=trade.entry_price_short,
+            current_price_long=long_data.bid,
+            current_price_short=short_data.ask,
+            position_size_usd=trade.position_size_usd,
+            leverage=getattr(trade, 'leverage', 10),
+            fee_rate=0.0005
+        )
         
-        return pnl_long + pnl_short
+        return result['net_pct']
+
     
     def update_amplitude_history(self, symbol: str, amplitude: float):
         """Обновление истории амплитуд"""

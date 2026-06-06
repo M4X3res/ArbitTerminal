@@ -10,7 +10,7 @@ from datetime import datetime
 import aiohttp
 from exchanges.base import BaseExchange
 from exchanges.auth_utils import get_timestamp_ms, build_query_string, sign_request_hmac
-from models import MarketData
+from core.models import MarketData
 
 
 class MEXCExchange(BaseExchange):

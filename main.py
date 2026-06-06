@@ -4,43 +4,45 @@ import logging
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+# Создание директории для логов и данных
+Path("data_collection").mkdir(exist_ok=True)
 
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     handlers=[
-        RotatingFileHandler('arbitrage.log', maxBytes=10*1024*1024, backupCount=5),
+        RotatingFileHandler('data_collection/arbitrage.log', maxBytes=10*1024*1024, backupCount=5),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
-from env_loader import get_api_keys, get_telegram_config
+from core.utils.env_loader import get_api_keys, get_telegram_config
 from exchanges.mexc import MEXCExchange
 from exchanges.gate import GateExchange
 from exchanges.bybit import BybitExchange
 
-from market_data_engine import MarketDataEngine
-from arbitrage_engine import ArbitrageEngine
-from trading_engine import TradingEngine
-from risk_manager import RiskManager
-from position_manager import PositionManager
-from strategy_selector import StrategySelector
-from utils import TelegramLogger
-from opportunity_analyzer import OpportunityAnalyzer
-from opportunity_config import OPPORTUNITY_CONFIG
+from core.engines.market_data_engine import MarketDataEngine
+from core.engines.arbitrage_engine import ArbitrageEngine
+from core.engines.trading_engine import TradingEngine
+from core.managers.risk_manager import RiskManager
+from core.managers.position_manager import PositionManager
+from strategies.strategy_selector import StrategySelector
+from utils.telegram_logger import TelegramLogger
+from core.analyzers.opportunity_analyzer import OpportunityAnalyzer
+from config.opportunity_config import OPPORTUNITY_CONFIG
 
-from config import (
-    OPEN_THRESHOLD, MAX_OPEN_POSITIONS
-)
+from config import main_config as config
 
 # Стратегия выбирается динамически
 STRATEGY = 'dynamic'  # используется только для отображения
 
 # Импорт производительной конфигурации (если есть)
 try:
-    from performance_config import (
+    from config.performance_config import (
         MAX_WORKERS, SYMBOLS_PER_EXCHANGE, ANALYSIS_INTERVAL,
         STATS_INTERVAL, OPPORTUNITY_DISPLAY_INTERVAL, TOP_OPPORTUNITIES
     )
@@ -73,6 +75,11 @@ class ArbitrageSystem:
         self.running = False
         self.pairwise_symbols = {}  # Попарные пересечения символов
         self.executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)  # Пул потоков для анализа
+        
+        # High-spread компоненты
+        self.hs_classifier = None
+        self.hs_analyzer = None
+        self.hs_exit_strategy = None
     
     async def initialize(self):
         """Инициализация всех компонентов"""
@@ -137,12 +144,24 @@ class ArbitrageSystem:
             self.risk_manager  # Передаём risk_manager для обновления баланса
         )
         
-        mode_text = "DEMO" if self.demo_mode else "LIVE"
+        # High-spread компоненты
+        from core.analyzers.high_spread_classifier import HighSpreadClassifier
+        from core.analyzers.high_spread_analyzer import HighSpreadAnalyzer, HIGH_SPREAD_CONFIG
+        from core.analyzers.high_spread_exit_strategy import HighSpreadExitStrategy
+        
+        self.hs_classifier = HighSpreadClassifier()
+        self.hs_analyzer = HighSpreadAnalyzer(
+            config=HIGH_SPREAD_CONFIG,
+            position_size_usd=self.risk_manager.calculate_position_size(),
+        )
+        self.hs_exit_strategy = HighSpreadExitStrategy()
+        
+        mode_text = "LIVE" if not self.demo_mode else "DEMO"
         print(f"   ✓ Все движки созданы ({mode_text} режим)")
-        print(f"   📊 Стратегия: DYNAMIC (Net Edge)")
+        print(f"   📊 Стратегия: DYNAMIC (Net Edge) + HIGH-SPREAD")
         print(f"   📊 Баланс: {self.initial_balance} USD")
         print(f"   📊 Размер позиции: {self.risk_manager.calculate_position_size()} USD (1/10 баланса)")
-        print(f"   📊 Макс позиций: {MAX_OPEN_POSITIONS}")
+        print(f"   📊 Макс позиций: {config.MAX_OPEN_POSITIONS}")
         print(f"   📊 Min Net Edge: {OPPORTUNITY_CONFIG['MIN_NET_EDGE']}%")
         
         # Уведомление в Telegram
@@ -210,7 +229,7 @@ class ArbitrageSystem:
                 None,  # Используем дефолтный executor
                 self.arbitrage_engine.find_opportunities_parallel,  # Параллельная версия
                 market_data,
-                OPEN_THRESHOLD,
+                config.OPEN_THRESHOLD,
                 50  # batch_size
             )
             
@@ -221,9 +240,74 @@ class ArbitrageSystem:
             if opportunities and (current_time - last_opportunity_time) >= OPPORTUNITY_DISPLAY_INTERVAL:
                 last_opportunity_time = current_time
                 
-                # Анализируем все opportunities с net edge strategy
+                # Разделяем на regular и high-spread
+                
+                regular_opps = []
+                high_spread_opps = []
+                
+                for opp in opportunities:
+                    # Проверяем EFFECTIVE spread для high-spread режима
+                    if config.HIGH_SPREAD_MODE and opp.effective_spread >= config.HIGH_SPREAD_MIN_PCT:
+                        high_spread_opps.append(opp)
+                    else:
+                        regular_opps.append(opp)
+                
+                # Обработка HIGH-SPREAD возможностей
+                if high_spread_opps:
+                    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 🔥 HIGH-SPREAD: {len(high_spread_opps)} candidates")
+                    
+                    for opp in high_spread_opps[:TOP_OPPORTUNITIES]:
+                        # 1. Классифицировать
+                        classification = self.hs_classifier.classify(opp, market_data)
+                        
+                        # 2. Получить orderbook для ликвидности
+                        ob_long = getattr(self.exchanges.get(opp.exchange_long), "orderbooks", {}).get(opp.symbol, {})
+                        ob_short = getattr(self.exchanges.get(opp.exchange_short), "orderbooks", {}).get(opp.symbol, {})
+                        
+                        # 3. Анализировать
+                        analysis = self.hs_analyzer.analyze(opp, classification, ob_long, ob_short)
+                        
+                        if not analysis.approved:
+                            print(f"   ❌ {opp.symbol} {opp.spread:.2f}% {opp.exchange_long}↔{opp.exchange_short}")
+                            print(f"      Type: {classification.spread_type.value}, Reason: {analysis.reject_reason}")
+                            continue
+                        
+                        # 4. Risk check
+                        risk = self.risk_manager.check_opportunity(opp, market_data)
+                        if not risk["approved"]:
+                            print(f"   ❌ {opp.symbol} {opp.spread:.2f}% — Risk: {risk['reason']}")
+                            continue
+                        
+                        # 5. Открыть позицию
+                        success, pair_id = await self.trading_engine.execute_arbitrage(
+                            opp,
+                            analysis.effective_position_size,
+                            "high_spread",
+                        )
+                        
+                        if success:
+                            trade = self.trading_engine.get_position(pair_id)
+                            # Сохранить метаданные
+                            trade.hs_spread_type = classification.spread_type.value
+                            trade.hs_max_hold_min = classification.max_hold_minutes
+                            
+                            self.position_manager.register_position(trade)
+                            self.risk_manager.register_position(pair_id, opp.symbol, opp.exchange_long, opp.exchange_short)
+                            
+                            print(f"   ✅ {opp.symbol} {opp.spread:.2f}% OPENED")
+                            print(f"      Type: {classification.spread_type.value}, Net: {analysis.net_edge_pct:.2f}%, Hold: ≤{classification.max_hold_minutes}min")
+                            
+                            await self.telegram.log_position_opened(
+                                symbol=opp.symbol,
+                                exchange_long=opp.exchange_long,
+                                exchange_short=opp.exchange_short,
+                                spread=opp.spread,
+                                position_size=analysis.effective_position_size
+                            )
+                
+                # Анализируем regular opportunities с net edge strategy
                 analyzed_opportunities = []
-                for opp in opportunities[:TOP_OPPORTUNITIES * 2]:  # Анализируем больше для фильтрации
+                for opp in regular_opps[:TOP_OPPORTUNITIES * 2]:
                     try:
                         analysis = self.opportunity_analyzer.analyze(opp)
                         analyzed_opportunities.append(analysis)
@@ -384,7 +468,7 @@ async def main():
     """Основная функция"""
     print("="*70)
     print("   CRYPTO ARBITRAGE SYSTEM — PRODUCTION READY")
-    print(f"   Strategy: {STRATEGY.upper()} | Min Spread: {OPEN_THRESHOLD}%")
+    print(f"   Strategy: {STRATEGY.upper()} | Min Spread: {config.OPEN_THRESHOLD}%")
     print(f"   Auto trading | Position management | Risk control")
     print("="*70)
     

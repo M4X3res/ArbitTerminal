@@ -3,7 +3,7 @@ from typing import Dict, List
 from collections import deque
 from datetime import datetime
 import statistics
-from models import Trade, MarketData
+from core.models import Trade, MarketData
 
 
 class AmplitudeStrategy:
@@ -27,6 +27,8 @@ class AmplitudeStrategy:
     
     def calculate_amplitude(self, trade: Trade, market_data: Dict[str, Dict[str, MarketData]]) -> float:
         """Расчёт текущей амплитуды позиции (совокупный PnL)"""
+        from core.analyzers.pnl_calculator import calculate_net_pnl
+        
         # Получаем текущие цены
         long_data = market_data.get(trade.exchange_long, {}).get(trade.symbol)
         short_data = market_data.get(trade.exchange_short, {}).get(trade.symbol)
@@ -34,24 +36,18 @@ class AmplitudeStrategy:
         if not long_data or not short_data:
             return 0.0
         
-        # PnL на лонг позиции (покупали по ask, продаём по bid)
-        pnl_long = (long_data.bid - trade.entry_price_long) / trade.entry_price_long * 100
+        # Используем унифицированный калькулятор PnL
+        result = calculate_net_pnl(
+            entry_price_long=trade.entry_price_long,
+            entry_price_short=trade.entry_price_short,
+            current_price_long=long_data.bid,
+            current_price_short=short_data.ask,
+            position_size_usd=trade.position_size_usd,
+            leverage=getattr(trade, 'leverage', 10),
+            fee_rate=0.0005
+        )
         
-        # PnL на шорт позиции (продавали по bid, покупаем по ask)
-        pnl_short = (trade.entry_price_short - short_data.ask) / trade.entry_price_short * 100
-        
-        # Совокупная амплитуда в %
-        amplitude_pct = pnl_long + pnl_short
-        
-        # Конвертируем в USD с учётом leverage
-        # Реальная позиция = position_size_usd * leverage, но PnL считается от реальной позиции
-        leverage = getattr(trade, 'leverage', 10)
-        amplitude_usd = amplitude_pct * trade.position_size_usd * leverage / 100
-        
-        # Вычитаем комиссии: 4 операции × 0.05% maker fee (или 0.1% taker)
-        fee_rate = 0.0005  # 0.05% maker fee
-        total_fees = trade.position_size_usd * leverage * fee_rate * 4
-        amplitude_usd -= total_fees
+        amplitude_usd = result['net_usd']
         
         return amplitude_usd
     

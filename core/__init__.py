@@ -1,10 +1,9 @@
 """Core package initialization"""
-from core.models import MarketData, Position, ArbitragePair, Trade
-from core.market_data_engine import MarketDataEngine
-from core.arbitrage_engine import ArbitrageEngine
-from core.trading_engine import TradingEngine
-from core.risk_manager import RiskManager
-from core.position_manager import PositionManager
+# Ленивая инициализация для избежания циклических импортов
+# Импортируйте компоненты напрямую:
+# from core.models import MarketData, Position, ArbitragePair, Trade
+# from core.engines.market_data_engine import MarketDataEngine
+# и т.д.
 
 __all__ = [
     'MarketData',

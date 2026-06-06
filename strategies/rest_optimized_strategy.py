@@ -1,7 +1,7 @@
 """REST-оптимизированная стратегия закрытия"""
 from typing import Dict
 from datetime import datetime
-from models import Trade, MarketData
+from core.models import Trade, MarketData
 
 
 class RestOptimizedStrategy:
@@ -29,7 +29,7 @@ class RestOptimizedStrategy:
     
     def calculate_pnl(self, trade: Trade, market_data: Dict[str, Dict[str, MarketData]]) -> float:
         """Расчёт текущего PnL в процентах (используя pnl_calculator)"""
-        from pnl_calculator import calculate_net_pnl
+        from core.analyzers.pnl_calculator import calculate_net_pnl
         
         long_data = market_data.get(trade.exchange_long, {}).get(trade.symbol)
         short_data = market_data.get(trade.exchange_short, {}).get(trade.symbol)

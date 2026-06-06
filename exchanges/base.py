@@ -2,9 +2,9 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict
 import aiohttp
-from models import MarketData
-from rate_limiter import get_rate_limiter
-from symbol_utils import normalize_symbol, to_exchange_symbol
+from core.models import MarketData
+from core.utils.rate_limiter import get_rate_limiter
+from core.utils.symbol_utils import normalize_symbol, to_exchange_symbol
 
 
 class BaseExchange(ABC):

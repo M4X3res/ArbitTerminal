@@ -6,7 +6,7 @@ from typing import List
 import aiohttp
 from .base import BaseExchange
 from .auth_utils import sign_request_hmac, get_timestamp_ms, build_query_string
-from models import MarketData
+from core.models import MarketData
 
 
 class AsterDEXExchange(BaseExchange):

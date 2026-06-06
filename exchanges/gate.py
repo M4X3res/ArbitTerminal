@@ -10,7 +10,7 @@ from typing import List, Dict
 from datetime import datetime
 from exchanges.base import BaseExchange
 from exchanges.auth_utils import get_timestamp_ms
-from models import MarketData
+from core.models import MarketData
 
 
 class GateExchange(BaseExchange):

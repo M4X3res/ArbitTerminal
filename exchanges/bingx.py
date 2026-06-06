@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import List
 import aiohttp
 from .base import BaseExchange
-from models import MarketData
+from core.models import MarketData
 
 
 class BingXExchange(BaseExchange):

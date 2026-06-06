@@ -3,7 +3,7 @@ from typing import Dict
 from collections import deque
 from datetime import datetime
 import statistics
-from models import Trade, MarketData
+from core.models import Trade, MarketData
 
 
 class MomentumReversalStrategy:
@@ -49,16 +49,26 @@ class MomentumReversalStrategy:
     
     def calculate_pnl_pct(self, trade: Trade, market_data: Dict[str, Dict[str, MarketData]]) -> float:
         """Расчёт PnL в процентах"""
+        from core.analyzers.pnl_calculator import calculate_net_pnl
+        
         long_data = market_data.get(trade.exchange_long, {}).get(trade.symbol)
         short_data = market_data.get(trade.exchange_short, {}).get(trade.symbol)
         
         if not long_data or not short_data:
             return 0.0
         
-        pnl_long = (long_data.bid - trade.entry_price_long) / trade.entry_price_long * 100
-        pnl_short = (trade.entry_price_short - short_data.ask) / trade.entry_price_short * 100
+        result = calculate_net_pnl(
+            entry_price_long=trade.entry_price_long,
+            entry_price_short=trade.entry_price_short,
+            current_price_long=long_data.bid,
+            current_price_short=short_data.ask,
+            position_size_usd=trade.position_size_usd,
+            leverage=getattr(trade, 'leverage', 10),
+            fee_rate=0.0005
+        )
         
-        return pnl_long + pnl_short
+        return result['net_pct']
+
     
     def detect_momentum_reversal(self, pair_id: str, current_spread: float) -> bool:
         """Обнаружение разворота импульса"""
