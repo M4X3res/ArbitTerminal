@@ -413,7 +413,7 @@ class ArbitrageSystem:
                     # Отправка в Telegram
                     await self.telegram.log_daily_stats(
                         total_trades=pos_stats['total_trades'],
-                        profitable=pos_stats['profitable_trades'],
+                        profitable=pos_stats['profitable'],
                         total_pnl=pos_stats['total_pnl'],
                         win_rate=pos_stats['win_rate'],
                         avg_hold_time=pos_stats['avg_hold_time']
