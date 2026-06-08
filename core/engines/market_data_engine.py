@@ -50,16 +50,6 @@ class MarketDataEngine:
             exchange_symbols[name] = normalized
             print(f"   ✓ {name}: {len(normalized)} инструментов (исключено: {len(instruments) - len(normalized)})")
         
-            print(f"   ✓ {name}: {len(instruments)} инструментов")
-            
-            # Нормализуем символы
-            normalized = set()
-            for symbol in instruments:
-                norm = symbol.replace("-", "").replace("_", "").upper()
-                normalized.add(norm)
-            
-            exchange_symbols[name] = normalized
-        
         # Находим пересечения попарно
         exchange_names = list(exchange_symbols.keys())
         pairwise_common = {}

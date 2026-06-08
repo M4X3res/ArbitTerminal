@@ -5,7 +5,8 @@ from pathlib import Path
 
 def load_env():
     """Загрузка переменных окружения из .env файла"""
-    env_path = Path(__file__).parent / '.env'
+    # Ищем .env в корне проекта (2 уровня вверх от core/utils/)
+    env_path = Path(__file__).parent.parent.parent / '.env'
     
     if not env_path.exists():
         print("⚠️  .env файл не найден. Используйте .env.example как шаблон.")

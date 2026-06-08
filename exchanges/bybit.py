@@ -93,7 +93,7 @@ class BybitExchange(BaseExchange):
     
     async def _handle_message(self, data: dict):
         """Обработка входящего сообщения"""
-        print(f"🔍 BYBIT RAW MESSAGE: {data}")  # Отладка входящих сообщений
+        # print(f"🔍 BYBIT RAW MESSAGE: {data}")  # Отладка отключена
         try:
             # Пропускаем служебные сообщения
             if data.get("op") in ["pong", "subscribe"]:
@@ -114,7 +114,7 @@ class BybitExchange(BaseExchange):
                         "bid": float(bids[0][0]),
                         "ask": float(asks[0][0])
                     }
-                    print(f"✅ BYBIT orderbook saved: {symbol}")
+                    # print(f"✅ BYBIT orderbook saved: {symbol}")
             
             # Funding rate from tickers
             elif topic.startswith("tickers"):
@@ -125,7 +125,7 @@ class BybitExchange(BaseExchange):
                 if sym and funding_rate is not None:
                     symbol = self._normalize_symbol(sym)
                     self.funding_rates[symbol] = float(funding_rate)
-                    print(f"✅ BYBIT funding rate saved: {symbol}")
+                    # print(f"✅ BYBIT funding rate saved: {symbol}")
         except Exception as e:
             print(f"⚠️ Bybit message parse error: {e}")
         

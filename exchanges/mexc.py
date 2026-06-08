@@ -48,19 +48,30 @@ class MEXCExchange(BaseExchange):
                 await self.connect_ws()
                 await self.subscribe_orderbook(symbols)
                 
-                # 🔧 FIX: Явный recv() вместо async for для предотвращения race condition
+                # 🔧 FIX: ping/pong для keep-alive
+                last_ping = asyncio.get_event_loop().time()
+                
                 while self.ws_running and self.ws:
                     try:
-                        message = await self.ws.recv()
+                        # Отправляем ping каждые 15 секунд
+                        now = asyncio.get_event_loop().time()
+                        if now - last_ping > 15:
+                            await self.ws.ping()
+                            last_ping = now
+                        
+                        message = await asyncio.wait_for(self.ws.recv(), timeout=30)
                         data = json.loads(message)
                         await self._handle_message(data)
+                    except asyncio.TimeoutError:
+                        print("⚠️ MEXC WS no data for 30s, pinging...")
+                        await self.ws.ping()
                     except websockets.exceptions.ConnectionClosed:
                         print("⚠️ MEXC WS connection closed, reconnecting...")
                         break
                     
             except Exception as e:
                 print(f"❌ MEXC WebSocket error: {e}, reconnecting...")
-                await asyncio.sleep(2)
+                await asyncio.sleep(5)
     
     async def stop_websocket(self):
         """Остановка WebSocket"""
@@ -78,7 +89,7 @@ class MEXCExchange(BaseExchange):
     
     async def _handle_message(self, data: dict):
         """Обработка входящего сообщения"""
-        print(f"🔍 MEXC RAW MESSAGE: {data}")  # Отладка входящих сообщений
+        # print(f"🔍 MEXC RAW MESSAGE: {data}")  # Отладка отключена
         try:
             # Обработка depth
             if data.get("channel") == "push.depth":
@@ -91,19 +102,24 @@ class MEXCExchange(BaseExchange):
                         "bid": float(bids[0][0]),
                         "ask": float(asks[0][0])
                     }
-                    print(f"✅ MEXC orderbook saved: {symbol}")
+                    # print(f"✅ MEXC orderbook saved: {symbol}")
             
             # Обработка funding rate
             elif data.get("channel") == "push.funding.rate":
                 symbol = self._normalize_symbol(data["symbol"])
                 self.funding_rates[symbol] = float(data["data"]["rate"])
-                print(f"✅ MEXC funding rate saved: {symbol}")
+                # print(f"✅ MEXC funding rate saved: {symbol}")
         except Exception as e:
             print(f"⚠️ MEXC message parse error: {e}")
     
     async def connect_ws(self):
         """Подключение к WebSocket"""
-        self.ws = await websockets.connect(self.WS_URL)
+        self.ws = await websockets.connect(
+            self.WS_URL,
+            ping_interval=20,  # Автоматический ping каждые 20 секунд
+            ping_timeout=10,   # Ждём pong 10 секунд
+            close_timeout=5
+        )
         print(f"✅ MEXC WebSocket connected")
     
     async def subscribe_orderbook(self, symbols: List[str]):

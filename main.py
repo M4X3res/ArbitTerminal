@@ -388,6 +388,15 @@ class ArbitrageSystem:
                     print(f"   Закрытых сделок: {pos_stats['total_trades']}")
                     print(f"   Win rate: {pos_stats['win_rate']:.1f}%")
                     print(f"   Общий PnL: {pos_stats['total_pnl']:+.2f} USD")
+                    
+                    # Отправка в Telegram
+                    await self.telegram.log_daily_stats(
+                        total_trades=pos_stats['total_trades'],
+                        profitable=pos_stats['profitable_trades'],
+                        total_pnl=pos_stats['total_pnl'],
+                        win_rate=pos_stats['win_rate'],
+                        avg_hold_time=pos_stats['avg_hold_time']
+                    )
                 print()
                 last_stats_time = current_time
             

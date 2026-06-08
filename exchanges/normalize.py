@@ -5,7 +5,7 @@ from pathlib import Path
 import threading
 
 # Максимальный адекватный спред для реального арбитража (в процентах)
-MAX_SPREAD_THRESHOLD = 13.0
+MAX_SPREAD_THRESHOLD = 20.0
 
 # Contract multipliers для нормализации цен контрактов
 # Ключ: (exchange, symbol), Значение: множитель контракта

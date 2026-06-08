@@ -78,7 +78,7 @@ class GateExchange(BaseExchange):
     
     async def _handle_message(self, data: dict):
         """Обработка входящего сообщения"""
-        print(f"🔍 GATE RAW MESSAGE: {data}")  # Отладка входящих сообщений
+        # print(f"🔍 GATE RAW MESSAGE: {data}")  # Отладка отключена
         try:
             channel = data.get("channel")
             event = data.get("event")
@@ -100,7 +100,7 @@ class GateExchange(BaseExchange):
                         "bid": float(bids[0]["p"]),
                         "ask": float(asks[0]["p"])
                     }
-                    print(f"✅ GATE orderbook saved: {symbol}")
+                    # print(f"✅ GATE orderbook saved: {symbol}")
             
             # Обработка tickers
             elif channel == "futures.tickers" and event == "update":
@@ -111,7 +111,7 @@ class GateExchange(BaseExchange):
                     if contract and funding_rate is not None:
                         symbol = self._normalize_symbol(contract)
                         self.funding_rates[symbol] = float(funding_rate)
-                        print(f"✅ GATE funding rate saved: {symbol}")
+                        # print(f"✅ GATE funding rate saved: {symbol}")
         except Exception as e:
             print(f"⚠️ Gate.io message parse error: {e}")
     
