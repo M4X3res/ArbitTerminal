@@ -278,7 +278,18 @@ class ArbitrageSystem:
                             print(f"   ❌ {opp.symbol} {opp.spread:.2f}% — Risk: {risk['reason']}")
                             continue
                         
-                        # 5. Открыть позицию
+                        # 5. Финальная проверка актуальности спреда (ОШИБКА #2 FIX)
+                        fresh_data = self.market_data_engine.get_latest_data()
+                        long_fresh = fresh_data.get(opp.exchange_long, {}).get(opp.symbol)
+                        short_fresh = fresh_data.get(opp.exchange_short, {}).get(opp.symbol)
+                        
+                        if long_fresh and short_fresh:
+                            fresh_spread = (short_fresh.bid - long_fresh.ask) / long_fresh.ask * 100
+                            if fresh_spread < config.HIGH_SPREAD_MIN_PCT:
+                                print(f"   ⚠️ {opp.symbol} — spread collapsed: {opp.spread:.2f}% → {fresh_spread:.2f}%")
+                                continue
+                        
+                        # 6. Открыть позицию
                         success, pair_id = await self.trading_engine.execute_arbitrage(
                             opp,
                             analysis.effective_position_size,
@@ -332,17 +343,27 @@ class ArbitrageSystem:
                     print(f"      Gross: {analysis.gross_spread_pct:.3f}% → Net Edge: {analysis.net_edge_pct:.3f}%")
                     
                     if risk_check["approved"]:
-                        # Повторная проверка спреда перед открытием (защита от схлопывания)
-                        long_data = market_data.get(opp.exchange_long, {}).get(opp.symbol)
-                        short_data = market_data.get(opp.exchange_short, {}).get(opp.symbol)
+                        # Финальная проверка актуальности спреда (ОШИБКА #2 FIX)
+                        fresh_data = self.market_data_engine.get_latest_data()
+                        long_fresh = fresh_data.get(opp.exchange_long, {}).get(opp.symbol)
+                        short_fresh = fresh_data.get(opp.exchange_short, {}).get(opp.symbol)
                         
-                        if long_data and short_data:
-                            current_spread = (short_data.bid - long_data.ask) / long_data.ask * 100
+                        if long_fresh and short_fresh:
+                            fresh_spread = (short_fresh.bid - long_fresh.ask) / long_fresh.ask * 100
                             
-                            # Если спред упал более чем на 10%, пропускаем
-                            if current_spread < opp.spread * 0.9:
-                                print(f"      ⚠️ Спред схлопнулся: {opp.spread:.2f}% → {current_spread:.2f}%, пропускаем")
+                            # Проверяем что спред не схлопнулся
+                            if fresh_spread < opp.spread * 0.9:
+                                print(f"      ⚠️ Spread collapsed: {opp.spread:.2f}% → {fresh_spread:.2f}%")
                                 continue
+                            
+                            # Пересчитываем net edge со свежими данными
+                            fresh_funding_diff = abs(long_fresh.funding_rate - short_fresh.funding_rate)
+                            if fresh_funding_diff > 0.01:
+                                print(f"      ⚠️ Funding diff too high: {fresh_funding_diff:.4f}")
+                                continue
+                        else:
+                            print(f"      ⚠️ Fresh data unavailable")
+                            continue
                         
                         # Динамический выбор стратегии по спреду
                         strategy, strategy_name = self.strategy_selector.select_strategy(opp.spread)

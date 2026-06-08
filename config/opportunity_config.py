@@ -21,4 +21,8 @@ OPPORTUNITY_CONFIG = {
     # Exit strategy
     'TAKE_PROFIT_NET': 0.15,       # Take profit на net edge (%)
     'STOP_LOSS_NET': -0.30,        # Stop loss на net edge (%)
+    
+    # Funding rate calculation (БАГ ОШИБКА #1 FIX)
+    'MAX_HOLD_TIME_SEC': 180,      # Для расчёта funding cost (REST стратегия: 3 минуты)
+    'FUNDING_PERIOD_SEC': 28800,   # 8 часов в секундах (стандартный период funding)
 }

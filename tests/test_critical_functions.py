@@ -1,7 +1,11 @@
 """Unit tests для критических функций"""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import pytest
-from order_utils import calculate_order_qty, map_order_side
-from pnl_calculator import calculate_net_pnl, calculate_pnl_from_spread
+from core.utils.order_utils import calculate_order_qty, map_order_side
+from core.analyzers.pnl_calculator import calculate_net_pnl, calculate_pnl_from_spread
 
 
 class TestOrderUtils:

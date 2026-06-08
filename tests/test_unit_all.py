@@ -1,10 +1,14 @@
 """Unit-тесты для критических компонентов системы (pytest)"""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import pytest
 from datetime import datetime
 from core.models import MarketData, ArbitragePair, Trade
-from order_utils import calculate_order_qty, map_order_side
-from symbol_utils import normalize_symbol, to_exchange_symbol
-from pnl_calculator import calculate_net_pnl
+from core.utils.order_utils import calculate_order_qty, map_order_side
+from core.utils.symbol_utils import normalize_symbol, to_exchange_symbol
+from core.analyzers.pnl_calculator import calculate_net_pnl
 from core.managers.risk_manager import RiskManager
 from core.engines.arbitrage_engine import ArbitrageEngine
 

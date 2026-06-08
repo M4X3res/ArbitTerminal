@@ -88,6 +88,9 @@ class TradingEngine:
             # Демо режим: симулируем закрытие
             trade.status = 'closed'
             trade.close_time = datetime.now()
+            # БАГ #7 FIX: Очищаем запись из open_positions
+            if pair_id in self.open_positions:
+                del self.open_positions[pair_id]
             return True
         
         # Продакшн режим
@@ -101,6 +104,9 @@ class TradingEngine:
             if not any(isinstance(r, Exception) for r in results):
                 trade.status = 'closed'
                 trade.close_time = datetime.now()
+                # БАГ #7 FIX: Очищаем запись из open_positions
+                if pair_id in self.open_positions:
+                    del self.open_positions[pair_id]
                 return True
                 
         except Exception as e:

@@ -92,6 +92,14 @@ class PositionManager:
                     self.risk_manager.update_balance(pnl_usd)
                     # Удаляем позицию из risk manager
                     self.risk_manager.unregister_position(pair_id)
+                    
+                    # УЛУЧШЕНИЕ #2: Регистрируем cooldown при убытке
+                    if pnl_usd < 0:
+                        self.risk_manager.register_loss(
+                            trade.symbol, 
+                            trade.exchange_long, 
+                            trade.exchange_short
+                        )
                 
                 # Вывод
                 emoji = "✅" if pnl_usd > 0 else "❌"
@@ -108,6 +116,11 @@ class PositionManager:
                     hold_time=hold_time,
                     reason=reason
                 )
+            
+            # БАГ #6 FIX: Очищаем trailing-стоп состояние для high-spread позиций
+            trade_strategy = getattr(trade, 'strategy_name', '')
+            if trade_strategy == 'high_spread':
+                self.strategy_selector.high_spread.cleanup(pair_id)
             
             # Удаляем из активных
             del self.positions[pair_id]

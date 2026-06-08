@@ -38,6 +38,10 @@ class OpportunityAnalyzer:
         self.TAKER_FEE_PCT = self.config.get('TAKER_FEE_PCT', 0.05)  # 0.05% per side
         self.SLIPPAGE_PCT = self.config.get('SLIPPAGE_PCT', 0.05)   # 0.05% per side (REST реальность)
         self.REST_EXECUTION_BUFFER = self.config.get('REST_EXECUTION_BUFFER', 0.1)  # 0.1% буфер на REST задержку
+        
+        # БАГ ОШИБКА #1 FIX: Параметры для корректного расчёта funding cost
+        self.MAX_HOLD_TIME_SEC = self.config.get('MAX_HOLD_TIME_SEC', 180)  # 3 минуты для REST
+        self.FUNDING_PERIOD_SEC = self.config.get('FUNDING_PERIOD_SEC', 28800)  # 8 часов
     
     def analyze(self, opportunity: ArbitragePair) -> OpportunityAnalysis:
         """Полный анализ арбитражной возможности"""
@@ -55,11 +59,12 @@ class OpportunityAnalyzer:
         # 4. Slippage (открытие + закрытие = 4 сделки)
         estimated_slippage_pct = self.SLIPPAGE_PCT * 4
         
-        # 5. Funding adjustment (разница funding rates за время удержания)
+        # 5. Funding adjustment (БАГ ОШИБКА #1 FIX: пропорционально времени удержания)
         funding_long = opportunity.data_long.funding_rate if opportunity.data_long else 0
         funding_short = opportunity.data_short.funding_rate if opportunity.data_short else 0
-        # Предполагаем удержание ~8 часов (1 funding period)
-        funding_adjustment_pct = abs(funding_long - funding_short) * 100
+        # Корректный расчёт: funding cost * (hold_time / funding_period)
+        hold_fraction = self.MAX_HOLD_TIME_SEC / self.FUNDING_PERIOD_SEC
+        funding_adjustment_pct = abs(funding_long - funding_short) * 100 * hold_fraction
         
         # 6. Net edge (добавляем REST execution buffer)
         net_edge_pct = (

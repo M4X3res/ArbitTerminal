@@ -39,6 +39,7 @@ class ArbitragePair:
     timestamp: datetime
     data_long: 'MarketData' = None
     data_short: 'MarketData' = None
+    effective_spread: float = 0.0
 
 
 @dataclass
@@ -58,3 +59,7 @@ class Trade:
     status: str = 'open'  # 'open', 'closed', 'failed'
     open_time: datetime = None
     close_time: Optional[datetime] = None
+    strategy_name: str = 'balanced'
+    leverage: int = 5
+    hs_spread_type: Optional[str] = None
+    hs_max_hold_min: int = 60

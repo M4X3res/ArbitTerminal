@@ -51,13 +51,15 @@ class ArbitrageEngine:
             # Стратегия 1
             spread1 = self.calculate_effective_spread(data_long, data_short)
             if spread1 > threshold:
+                funding_diff_1 = data_short.funding_rate - data_long.funding_rate
                 opp = ArbitragePair(
                     exchange_long=ex_long, exchange_short=ex_short,
                     symbol=symbol, spread=spread1,
-                    funding_diff=data_short.funding_rate - data_long.funding_rate,
+                    funding_diff=funding_diff_1,
                     price_long=data_long.ask, price_short=data_short.bid,
                     timestamp=datetime.now(),
-                    data_long=data_long, data_short=data_short
+                    data_long=data_long, data_short=data_short,
+                    effective_spread=spread1 - abs(funding_diff_1) * 100
                 )
                 opportunities.append(opp)
                 with self.stats_lock:
@@ -70,13 +72,15 @@ class ArbitrageEngine:
             # Стратегия 2
             spread2 = self.calculate_effective_spread(data_short, data_long)
             if spread2 > threshold:
+                funding_diff_2 = data_long.funding_rate - data_short.funding_rate
                 opp = ArbitragePair(
                     exchange_long=ex_short, exchange_short=ex_long,
                     symbol=symbol, spread=spread2,
-                    funding_diff=data_long.funding_rate - data_short.funding_rate,
+                    funding_diff=funding_diff_2,
                     price_long=data_short.ask, price_short=data_long.bid,
                     timestamp=datetime.now(),
-                    data_long=data_short, data_short=data_long
+                    data_long=data_short, data_short=data_long,
+                    effective_spread=spread2 - abs(funding_diff_2) * 100
                 )
                 opportunities.append(opp)
                 with self.stats_lock:

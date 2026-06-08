@@ -15,7 +15,7 @@ class TelegramLogger:
         self.api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage" if bot_token else None
         
         if not self.enabled:
-            print("⚠️  Telegram logger disabled (no credentials)")
+            print("[WARNING] Telegram logger disabled (no credentials)")
     
     async def send(self, message: str, parse_mode: str = "HTML"):
         """Отправка сообщения в Telegram"""
@@ -25,18 +25,20 @@ class TelegramLogger:
         try:
             async with aiohttp.ClientSession() as session:
                 data = {
-                    "chat_id": str(self.chat_id),  # Конвертируем в строку
+                    "chat_id": str(self.chat_id),
                     "text": message,
                     "parse_mode": parse_mode
                 }
                 async with session.post(self.api_url, json=data, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                     if resp.status != 200:
                         text = await resp.text()
-                        print(f"⚠️  Telegram send failed: {resp.status} - {text}")
+                        print(f"[TELEGRAM ERROR] Status {resp.status}: {text}")
+                    else:
+                        print(f"[TELEGRAM OK] Message sent")
         except asyncio.TimeoutError:
-            print(f"⚠️  Telegram timeout")
+            print(f"[TELEGRAM ERROR] Timeout")
         except Exception as e:
-            print(f"⚠️  Telegram error: {e}")
+            print(f"[TELEGRAM ERROR] {type(e).__name__}: {e}")
     
     async def log_system_start(self, balance: float, strategy: str, exchanges: list):
         """Логирование старта системы"""

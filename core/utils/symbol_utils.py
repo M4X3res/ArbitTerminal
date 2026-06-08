@@ -34,38 +34,6 @@ def to_canonical(exchange_symbol: str) -> str:
 normalize_symbol = to_canonical
 
 
-def to_exchange_symbol(canonical_symbol: str, exchange: str) -> str:
-    """
-    Конвертация canonical символа в формат конкретной биржи
-    
-    Args:
-        canonical_symbol: BTCUSDT
-        exchange: 'mexc', 'gate', 'bybit'
-        
-    Returns:
-        Символ в формате биржи
-        
-    Examples:
-        >>> to_exchange_symbol("BTCUSDT", "mexc")
-        'BTC_USDT'
-        >>> to_exchange_symbol("BTCUSDT", "bybit")
-        'BTCUSDT'
-    """
-    exchange = exchange.lower()
-    
-    if exchange in ('mexc', 'gate'):
-        # Пытаемся разделить по USDT/USDC/BUSD
-        for quote in ('USDT', 'USDC', 'BUSD', 'USD'):
-            if canonical_symbol.endswith(quote):
-                base = canonical_symbol[:-len(quote)]
-                return f"{base}_{quote}"
-        return canonical_symbol
-    
-    # Bybit использует canonical формат
-    return canonical_symbol
-
-
-
 def to_mexc_symbol(canonical_symbol: str) -> str:
     """
     Конвертация canonical в MEXC формат

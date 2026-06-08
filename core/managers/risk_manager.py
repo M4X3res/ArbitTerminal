@@ -1,5 +1,6 @@
 """Risk Manager — управление рисками"""
 from typing import Dict
+import time
 from datetime import datetime
 from core.models import ArbitragePair
 from config.main_config import (
@@ -7,7 +8,9 @@ from config.main_config import (
     MAX_OPEN_POSITIONS, 
     MAX_SPREAD_OPEN,
     POSITION_SIZE_FRACTION,
-    MAX_POSITIONS_PER_EXCHANGE
+    MAX_POSITIONS_PER_EXCHANGE,
+    ALLOW_MULTIPLE_POSITIONS_PER_SYMBOL,
+    COOLDOWN_AFTER_LOSS_SEC
 )
 
 # Минимальный объём ордера на каждой бирже (USD)
@@ -26,6 +29,10 @@ class RiskManager:
         self.balance = initial_balance
         self.open_positions: Dict[str, dict] = {}  # {pair_id: {symbol, exchange_long, exchange_short}}
         self.positions_per_exchange = {}  # Подсчет позиций по биржам
+        
+        # УЛУЧШЕНИЕ #2: Cooldown после убыточных сделок
+        self.cooldown_pairs: Dict[str, float] = {}  # pair_key → timestamp
+        self.recent_trades = []  # Список PnL для адаптивных порогов
     
     def calculate_position_size(self) -> float:
         """Расчёт размера позиции (1/10 от баланса)"""
@@ -43,6 +50,16 @@ class RiskManager:
         # Если есть analysis и он не одобрен - используем его причину
         if analysis and not analysis.approved:
             return {"approved": False, "reason": analysis.reason}
+        
+        # БАГ ОШИБКА #4 FIX: Проверка на двойные позиции по одному символу
+        if not ALLOW_MULTIPLE_POSITIONS_PER_SYMBOL:
+            for pos in self.open_positions.values():
+                if pos['symbol'] == opportunity.symbol:
+                    return {"approved": False, "reason": f"Position already open for {opportunity.symbol}"}
+        
+        # УЛУЧШЕНИЕ #2: Проверка cooldown после убыточной сделки
+        if self.is_in_cooldown(opportunity.symbol, opportunity.exchange_long, opportunity.exchange_short):
+            return {"approved": False, "reason": f"Cooldown active for {opportunity.symbol} (recent loss)"}
         
         # 1. Проверка количества открытых позиций (общее)
         if len(self.open_positions) >= MAX_OPEN_POSITIONS:
@@ -157,4 +174,16 @@ class RiskManager:
         """Обновление баланса после закрытия позиции"""
         self.balance += pnl
         print(f"💰 Balance updated: {self.balance:.2f} USD (PnL: {pnl:+.2f} USD)")
+    
+    def register_loss(self, symbol: str, exchange_long: str, exchange_short: str):
+        """УЛУЧШЕНИЕ #2: Регистрация убыточной сделки — устанавливает cooldown"""
+        key = f"{symbol}|{exchange_long}|{exchange_short}"
+        self.cooldown_pairs[key] = time.time()
+    
+    def is_in_cooldown(self, symbol: str, exchange_long: str, exchange_short: str) -> bool:
+        """УЛУЧШЕНИЕ #2: Проверка активен ли cooldown для этой пары"""
+        key = f"{symbol}|{exchange_long}|{exchange_short}"
+        if key not in self.cooldown_pairs:
+            return False
+        return (time.time() - self.cooldown_pairs[key]) < COOLDOWN_AFTER_LOSS_SEC
 
