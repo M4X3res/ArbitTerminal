@@ -10,7 +10,8 @@ from config.main_config import (
     POSITION_SIZE_FRACTION,
     MAX_POSITIONS_PER_EXCHANGE,
     ALLOW_MULTIPLE_POSITIONS_PER_SYMBOL,
-    COOLDOWN_AFTER_LOSS_SEC
+    COOLDOWN_AFTER_LOSS_SEC,
+    MAX_FUNDING_DIFF
 )
 
 # Минимальный объём ордера на каждой бирже (USD)
@@ -88,9 +89,12 @@ class RiskManager:
             if opportunity.spread > MAX_SPREAD_OPEN:
                 return {"approved": False, "reason": f"Spread too high (>{MAX_SPREAD_OPEN}%) - anomaly"}
         
-        # 4. Проверка funding rate
-        if abs(opportunity.funding_diff) > 0.01:  # 1%
-            return {"approved": False, "reason": "Funding rate diff too high (>1%)"}
+        # 4. Проверка funding rate (FIX: правильный порог)
+        if abs(opportunity.funding_diff) > MAX_FUNDING_DIFF:
+            return {
+                "approved": False, 
+                "reason": f"Funding rate diff too high ({abs(opportunity.funding_diff)*100:.3f}% > {MAX_FUNDING_DIFF*100:.1f}%)"
+            }
         
         # 5. Проверка баланса
         position_size = self.calculate_position_size()

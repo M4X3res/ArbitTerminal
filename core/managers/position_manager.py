@@ -116,6 +116,16 @@ class PositionManager:
                     hold_time=hold_time,
                     reason=reason
                 )
+                
+                # Отправляем обновлённую статистику после закрытия
+                stats = self.get_statistics()
+                await self.telegram.log_daily_stats(
+                    total_trades=stats['total_trades'],
+                    profitable=stats['profitable'],
+                    total_pnl=stats['total_pnl'],
+                    win_rate=stats['win_rate'],
+                    avg_hold_time=stats['avg_hold_time']
+                )
             
             # БАГ #6 FIX: Очищаем trailing-стоп состояние для high-spread позиций
             trade_strategy = getattr(trade, 'strategy_name', '')

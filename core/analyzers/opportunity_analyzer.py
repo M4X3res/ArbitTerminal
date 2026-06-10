@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime
 from core.models import ArbitragePair
+from config.main_config import HIGH_FREQUENCY_SYMBOLS, HF_MIN_NET_EDGE, HF_MAX_BID_ASK_SPREAD
 
 
 @dataclass
@@ -33,6 +34,10 @@ class OpportunityAnalyzer:
         self.MAX_GROSS_SPREAD = self.config.get('MAX_GROSS_SPREAD', 3.0)  # до 3% (было 5.0)
         self.MAX_BID_ASK_SPREAD_PER_LEG = self.config.get('MAX_BID_ASK_SPREAD_PER_LEG', 0.15)
         self.MAX_DATA_AGE_MS = self.config.get('MAX_DATA_AGE_MS', 500)  # 500ms max
+        
+        # ИЗМЕНЕНИЕ #4: Адаптивные пороги для высокочастотных символов
+        self.HF_MIN_NET_EDGE = HF_MIN_NET_EDGE  # 0.10% для HF символов
+        self.HF_MAX_BID_ASK = HF_MAX_BID_ASK_SPREAD  # 0.20% для HF символов
         
         # Trading parameters (реалистичные для REST)
         self.TAKER_FEE_PCT = self.config.get('TAKER_FEE_PCT', 0.05)  # 0.05% per side
@@ -80,13 +85,14 @@ class OpportunityAnalyzer:
         # 7. Data age
         data_age_ms = self._calculate_data_age(opportunity)
         
-        # 8. Approval logic
+        # 8. Approval logic (передаём symbol для адаптивных порогов)
         approved, reason = self._evaluate(
             gross_spread_pct,
             net_edge_pct,
             bid_ask_long,
             bid_ask_short,
-            data_age_ms
+            data_age_ms,
+            symbol=opportunity.symbol  # ИЗМЕНЕНИЕ #4: передаём symbol
         )
         
         return OpportunityAnalysis(
@@ -136,9 +142,15 @@ class OpportunityAnalyzer:
         net_edge: float,
         bid_ask_long: float,
         bid_ask_short: float,
-        data_age_ms: float
+        data_age_ms: float,
+        symbol: str = ""  # ИЗМЕНЕНИЕ #4: добавлен параметр symbol
     ) -> tuple[bool, str]:
         """Оценка возможности: approve/reject + причина"""
+        
+        # ИЗМЕНЕНИЕ #4: Адаптивные пороги для высокочастотных символов
+        is_hf = symbol in HIGH_FREQUENCY_SYMBOLS
+        min_net_edge = self.HF_MIN_NET_EDGE if is_hf else self.MIN_NET_EDGE
+        max_bid_ask = self.HF_MAX_BID_ASK if is_hf else self.MAX_BID_ASK_SPREAD_PER_LEG
         
         # Check 1: Stale data
         if data_age_ms > self.MAX_DATA_AGE_MS:
@@ -158,17 +170,18 @@ class OpportunityAnalyzer:
             if data_age_ms > 200:
                 return False, f"High spread with old data ({gross_spread:.3f}%, age {data_age_ms:.0f}ms)"
         
-        # Check 5: Bid-ask spread too wide on long leg
-        if bid_ask_long > self.MAX_BID_ASK_SPREAD_PER_LEG:
-            return False, f"Bid-ask too wide on long leg ({bid_ask_long:.3f}% > {self.MAX_BID_ASK_SPREAD_PER_LEG}%)"
+        # Check 5: Bid-ask spread too wide on long leg (адаптивный порог)
+        if bid_ask_long > max_bid_ask:
+            return False, f"Bid-ask too wide on long leg ({bid_ask_long:.3f}% > {max_bid_ask}%)"
         
-        # Check 6: Bid-ask spread too wide on short leg
-        if bid_ask_short > self.MAX_BID_ASK_SPREAD_PER_LEG:
-            return False, f"Bid-ask too wide on short leg ({bid_ask_short:.3f}% > {self.MAX_BID_ASK_SPREAD_PER_LEG}%)"
+        # Check 6: Bid-ask spread too wide on short leg (адаптивный порог)
+        if bid_ask_short > max_bid_ask:
+            return False, f"Bid-ask too wide on short leg ({bid_ask_short:.3f}% > {max_bid_ask}%)"
         
-        # Check 7: Net edge insufficient
-        if net_edge < self.MIN_NET_EDGE:
-            return False, f"Net edge insufficient ({net_edge:.3f}% < {self.MIN_NET_EDGE}%)"
+        # Check 7: Net edge insufficient (адаптивный порог)
+        if net_edge < min_net_edge:
+            return False, f"Net edge insufficient ({net_edge:.3f}% < {min_net_edge}%)"
         
         # All checks passed
-        return True, f"Approved: net edge {net_edge:.3f}%"
+        suffix = " [HF]" if is_hf else ""
+        return True, f"Approved: net edge {net_edge:.3f}%{suffix}"

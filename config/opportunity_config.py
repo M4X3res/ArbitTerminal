@@ -6,17 +6,18 @@ from config.main_config import OPEN_THRESHOLD, MAX_SPREAD_OPEN, MIN_NET_EDGE
 # Net Edge Strategy Thresholds
 OPPORTUNITY_CONFIG = {
     # Spread thresholds (синхронизировано с config.py)
-    'MIN_GROSS_SPREAD': OPEN_THRESHOLD,   # = 1.0%
-    'MIN_NET_EDGE': MIN_NET_EDGE,         # = 0.3%
-    'MAX_GROSS_SPREAD': MAX_SPREAD_OPEN,  # = 3.0%
+    'MIN_GROSS_SPREAD': OPEN_THRESHOLD,   # = 0.6% (оптимизировано)
+    'MIN_NET_EDGE': MIN_NET_EDGE,         # = 0.12% (оптимизировано)
+    'MAX_GROSS_SPREAD': MAX_SPREAD_OPEN,  # = 2.5% (оптимизировано)
     
     # Market quality
-    'MAX_BID_ASK_SPREAD_PER_LEG': 0.12,  # Максимальный bid-ask spread на одну позицию (%)
-    'MAX_DATA_AGE_MS': 1000,       # Максимальный возраст данных (ms)
+    'MAX_BID_ASK_SPREAD_PER_LEG': 0.15,  # Было 0.12 — увеличено для высоколиквидных символов
+    'MAX_DATA_AGE_MS': 800,       # Было 500 — увеличено: WebSocket может лагать до 500ms
     
-    # Trading costs
+    # Trading costs (оптимизировано для REST)
     'TAKER_FEE_PCT': 0.05,         # Комиссия taker на сделку (%)
-    'SLIPPAGE_PCT': 0.02,          # Ожидаемое проскальзывание на сделку (%)
+    'SLIPPAGE_PCT': 0.05,          # Было 0.02 — увеличено для реальности REST
+    'REST_EXECUTION_BUFFER': 0.10, # Добавлен буфер на REST задержки
     
     # Exit strategy
     'TAKE_PROFIT_NET': 0.15,       # Take profit на net edge (%)
