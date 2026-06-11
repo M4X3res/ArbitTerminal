@@ -17,11 +17,32 @@ class SpreadCollapseStrategy:
         self.max_hold_time_sec = max_hold_time_sec
     
     def calculate_current_spread(self, trade: Trade, market_data: Dict[str, Dict[str, MarketData]]) -> float:
-        """Расчёт текущего спреда"""
+        """Расчёт текущего спреда с проверкой валидности данных"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         long_data = market_data.get(trade.exchange_long, {}).get(trade.symbol)
         short_data = market_data.get(trade.exchange_short, {}).get(trade.symbol)
         
         if not long_data or not short_data:
+            return None
+        
+        # БАГ #3 FIX: Проверка нулевых цен (потеря данных)
+        if long_data.bid <= 0 or long_data.ask <= 0:
+            logger.warning(f"Zero prices on {trade.exchange_long} for {trade.symbol}")
+            return None
+        if short_data.bid <= 0 or short_data.ask <= 0:
+            logger.warning(f"Zero prices on {trade.exchange_short} for {trade.symbol}")
+            return None
+        
+        # БАГ #3 FIX: Проверка свежести данных (stale data)
+        now_ms = datetime.now().timestamp() * 1000
+        age_long = now_ms - long_data.timestamp.timestamp() * 1000
+        age_short = now_ms - short_data.timestamp.timestamp() * 1000
+        
+        if age_long > 3000 or age_short > 3000:
+            # Данные старше 3 секунд — не принимаем решение о закрытии
+            logger.warning(f"Stale data for {trade.symbol}: ages {age_long:.0f}/{age_short:.0f}ms")
             return None
         
         # Текущий спред (SHORT bid - LONG ask)

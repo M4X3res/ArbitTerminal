@@ -199,6 +199,53 @@ class ArbitrageSystem:
         await self.market_data_engine.subscribe_all(common_symbols)
         print("   ✓ Данные поступают в реальном времени")
     
+    async def watchdog_positions(self):
+        """
+        Watchdog: проверяет что все позиции синхронизированы между компонентами.
+        Запускается каждые 60 секунд.
+        """
+        while self.running:
+            await asyncio.sleep(60)
+            
+            try:
+                pm_positions = set(self.position_manager.positions.keys())
+                te_positions = set(self.trading_engine.open_positions.keys())
+                rm_positions = set(self.risk_manager.open_positions.keys())
+                
+                # Позиции в trading_engine но нет в position_manager (orphaned)
+                orphaned = te_positions - pm_positions
+                if orphaned:
+                    for pair_id in orphaned:
+                        trade = self.trading_engine.open_positions[pair_id]
+                        logger.error(f"WATCHDOG: orphaned position {pair_id[:8]} ({trade.symbol})")
+                        await self.telegram.log_error(
+                            "Watchdog: Orphaned Position",
+                            f"{trade.symbol} {pair_id[:8]}: in trading_engine but not in position_manager. Closing."
+                        )
+                        # Аварийное закрытие
+                        await self.trading_engine.close_position(pair_id)
+                
+                # Позиции в position_manager но не в trading_engine (ghost)
+                ghost = pm_positions - te_positions
+                if ghost:
+                    for pair_id in ghost:
+                        trade = self.position_manager.positions[pair_id]
+                        logger.error(f"WATCHDOG: ghost position {pair_id[:8]} ({trade.symbol})")
+                        await self.telegram.log_error(
+                            "Watchdog: Ghost Position",
+                            f"{trade.symbol}: in position_manager but not in trading_engine. Removing."
+                        )
+                        del self.position_manager.positions[pair_id]
+                        self.risk_manager.unregister_position(pair_id)
+                
+                # Расхождение в risk_manager
+                rm_ghost = rm_positions - pm_positions
+                for pair_id in rm_ghost:
+                    self.risk_manager.unregister_position(pair_id)
+                    
+            except Exception as e:
+                logger.error(f"Watchdog error: {e}")
+    
     async def run_arbitrage_monitoring(self):
         """Непрерывный мониторинг арбитража с автоматическим открытием/закрытием"""
         print(f"\n🔍 Запуск высокопроизводительного мониторинга...")
@@ -219,10 +266,9 @@ class ArbitrageSystem:
                 await asyncio.sleep(0.05)
                 continue
             
-            # Мониторинг открытых позиций (параллельно)
-            monitor_task = asyncio.create_task(
-                self.position_manager.monitor_positions(market_data)
-            )
+            # БАГ #1 FIX: Сначала мониторинг, ПОТОМ открытие новых
+            # Это предотвращает гонку между monitor и register_position
+            await self.position_manager.monitor_positions(market_data)
             
             # Параллельный анализ возможностей (батчинг в отдельных потоках)
             opportunities = await asyncio.get_event_loop().run_in_executor(
@@ -232,9 +278,6 @@ class ArbitrageSystem:
                 config.OPEN_THRESHOLD,
                 50  # batch_size
             )
-            
-            # Ждём завершения мониторинга позиций
-            await monitor_task
             
             # Показываем возможности
             if opportunities and (current_time - last_opportunity_time) >= OPPORTUNITY_DISPLAY_INTERVAL:
@@ -297,16 +340,32 @@ class ArbitrageSystem:
                         )
                         
                         if success:
-                            trade = self.trading_engine.get_position(pair_id)
-                            # Сохранить метаданные
-                            trade.hs_spread_type = classification.spread_type.value
-                            trade.hs_max_hold_min = classification.max_hold_minutes
-                            
-                            self.position_manager.register_position(trade)
-                            self.risk_manager.register_position(pair_id, opp.symbol, opp.exchange_long, opp.exchange_short)
-                            
-                            print(f"   ✅ {opp.symbol} {opp.spread:.2f}% OPENED")
-                            print(f"      Type: {classification.spread_type.value}, Net: {analysis.net_edge_pct:.2f}%, Hold: ≤{classification.max_hold_minutes}min")
+                            try:
+                                trade = self.trading_engine.get_position(pair_id)
+                                if trade is None:
+                                    logger.error(f"CRITICAL: trade {pair_id[:8]} not found after execute_arbitrage")
+                                    await self.telegram.log_error("Lost Trade", f"{opp.symbol} {pair_id[:8]}: position opened but not tracked")
+                                else:
+                                    # Сохранить метаданные
+                                    trade.hs_spread_type = classification.spread_type.value
+                                    trade.hs_max_hold_min = classification.max_hold_minutes
+                                    
+                                    self.position_manager.register_position(trade)
+                                    self.risk_manager.register_position(pair_id, opp.symbol, opp.exchange_long, opp.exchange_short)
+                                    
+                                    print(f"   ✅ {opp.symbol} {opp.spread:.2f}% OPENED")
+                                    print(f"      Type: {classification.spread_type.value}, Net: {analysis.net_edge_pct:.2f}%, Hold: ≤{classification.max_hold_minutes}min")
+                            except Exception as e:
+                                logger.error(f"CRITICAL: failed to register position {pair_id[:8]}: {e}")
+                                await self.telegram.log_error(
+                                    "Registration Failed",
+                                    f"{opp.symbol}: position OPEN on exchange but NOT tracked! Manual close required. pair_id={pair_id[:8]}"
+                                )
+                                # Аварийная попытка закрыть
+                                try:
+                                    await self.trading_engine.close_position(pair_id)
+                                except Exception as close_e:
+                                    logger.error(f"Emergency close also failed: {close_e}")
                             
                             await self.telegram.log_position_opened(
                                 symbol=opp.symbol,
@@ -375,19 +434,35 @@ class ArbitrageSystem:
                         )
                         
                         if success:
-                            trade = self.trading_engine.get_position(pair_id)
-                            self.position_manager.register_position(trade)
-                            self.risk_manager.register_position(pair_id, opp.symbol, opp.exchange_long, opp.exchange_short)
-                            
-                            print(f"      ✅ Позиция открыта: {pair_id[:8]}... (стратегия: {strategy_name})")
-                            
-                            await self.telegram.log_position_opened(
-                                symbol=opp.symbol,
-                                exchange_long=opp.exchange_long,
-                                exchange_short=opp.exchange_short,
-                                spread=opp.spread,
-                                position_size=position_size
-                            )
+                            try:
+                                trade = self.trading_engine.get_position(pair_id)
+                                if trade is None:
+                                    logger.error(f"CRITICAL: trade {pair_id[:8]} not found after execute_arbitrage")
+                                    await self.telegram.log_error("Lost Trade", f"{opp.symbol} {pair_id[:8]}: position opened but not tracked")
+                                else:
+                                    self.position_manager.register_position(trade)
+                                    self.risk_manager.register_position(pair_id, opp.symbol, opp.exchange_long, opp.exchange_short)
+                                    
+                                    print(f"      ✅ Позиция открыта: {pair_id[:8]}... (стратегия: {strategy_name})")
+                                    
+                                    await self.telegram.log_position_opened(
+                                        symbol=opp.symbol,
+                                        exchange_long=opp.exchange_long,
+                                        exchange_short=opp.exchange_short,
+                                        spread=opp.spread,
+                                        position_size=position_size
+                                    )
+                            except Exception as e:
+                                logger.error(f"CRITICAL: failed to register position {pair_id[:8]}: {e}")
+                                await self.telegram.log_error(
+                                    "Registration Failed",
+                                    f"{opp.symbol}: position OPEN on exchange but NOT tracked! Manual close required. pair_id={pair_id[:8]}"
+                                )
+                                # Аварийная попытка закрыть
+                                try:
+                                    await self.trading_engine.close_position(pair_id)
+                                except Exception as close_e:
+                                    logger.error(f"Emergency close also failed: {close_e}")
                     else:
                         print(f"      Причина: {risk_check['reason']}")
                 
@@ -417,6 +492,7 @@ class ArbitrageSystem:
     async def run(self, duration_seconds=None):
         """Запуск системы на определенное время (или бесконечно)"""
         self.running = True
+        watchdog_task = None
         
         try:
             # Запускаем сбор данных
@@ -425,6 +501,9 @@ class ArbitrageSystem:
             # Даём время на накопление данных
             print("⏳ Ожидание первых данных (10 сек)...\n")
             await asyncio.sleep(10)
+            
+            # БАГ #2 FIX: Запускаем watchdog параллельно
+            watchdog_task = asyncio.create_task(self.watchdog_positions())
             
             # Запускаем мониторинг
             if duration_seconds:
@@ -444,6 +523,12 @@ class ArbitrageSystem:
             print("\n\n⚠️  Остановка по запросу пользователя...")
         finally:
             self.running = False
+            if watchdog_task:
+                watchdog_task.cancel()
+                try:
+                    await watchdog_task
+                except asyncio.CancelledError:
+                    pass
             await self.cleanup()
     
     async def cleanup(self):
