@@ -152,17 +152,9 @@ class PositionManager:
             total_trades=stats['total_trades'],
             profitable=stats['profitable'],
             total_pnl=stats['total_pnl'],
-                    win_rate=stats['win_rate'],
-                    avg_hold_time=stats['avg_hold_time']
-                )
-            
-            # БАГ #6 FIX: Очищаем trailing-стоп состояние для high-spread позиций
-            trade_strategy = getattr(trade, 'strategy_name', '')
-            if trade_strategy == 'high_spread':
-                self.strategy_selector.high_spread.cleanup(pair_id)
-            
-            # Удаляем из активных
-            del self.positions[pair_id]
+            win_rate=stats['win_rate'],
+            avg_hold_time=stats['avg_hold_time']
+        )
     
     def get_statistics(self) -> Dict:
         """Статистика по позициям"""
