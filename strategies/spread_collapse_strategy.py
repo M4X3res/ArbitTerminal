@@ -53,7 +53,7 @@ class SpreadCollapseStrategy:
 
     
     def should_close(self, trade: Trade, market_data: Dict[str, Dict[str, MarketData]]) -> tuple[bool, str]:
-        """Проверка условий закрытия"""
+        """Проверка условий закрытия (asymmetric risk/reward)"""
         current_spread = self.calculate_current_spread(trade, market_data)
         
         if current_spread is None:
@@ -62,23 +62,34 @@ class SpreadCollapseStrategy:
         pnl_pct = self.calculate_pnl_pct(trade, market_data)
         time_held = (datetime.now() - trade.open_time).total_seconds()
         
-        # === УСЛОВИЕ 1: Спред схлопнулся ===
+        # === ВЫХОД В ПРИБЫЛЬ (более реалистичные цели) ===
+        
+        # 1. Спред схлопнулся до порога
         if current_spread <= self.collapse_threshold and pnl_pct >= self.min_profit_pct:
-            return True, f"Spread collapsed: {current_spread:.3f}% (entry: {trade.entry_spread:.3f}%), PnL: {pnl_pct:.3f}%"
+            return True, f"Collapse: spread {current_spread:.3f}%"
         
-        # === УСЛОВИЕ 2: Достигнута целевая прибыль ===
-        # Для спреда 5%+ целимся на 70% от него
-        target_profit = trade.entry_spread * 0.7
-        if pnl_pct >= target_profit:
-            return True, f"Target profit: {pnl_pct:.3f}% >= {target_profit:.3f}%"
+        # 2. Поэтапное снятие прибыли (30% от entry spread, max 1%)
+        partial_target = min(trade.entry_spread * 0.30, 1.0)
+        if pnl_pct >= partial_target:
+            return True, f"Partial target: {pnl_pct:.3f}% >= {partial_target:.3f}%"
         
-        # === УСЛОВИЕ 3: Stop-loss при развороте ===
+        # === СТОП-ЛОССЫ (УЖЕСТОЧЕНЫ) ===
+        
+        # 3. Hard stop: спред расширился более чем на 1.0% от входа
+        if current_spread > trade.entry_spread + 1.0:
+            return True, f"Hard stop: spread expanded to {current_spread:.3f}%"
+        
+        # 4. Time stop: если за 5 минут нет движения в нашу сторону — выходим
+        if time_held > 300 and pnl_pct < 0.05:
+            return True, f"Time stop: {time_held:.0f}s without progress (PnL: {pnl_pct:.3f}%)"
+        
+        # 5. Разворот спреда
         if current_spread < 0 and trade.entry_spread > 0:
-            return True, f"Spread reversal: {current_spread:.3f}% (was {trade.entry_spread:.3f}%)"
+            return True, f"Reversal: {current_spread:.3f}%"
         
-        # === УСЛОВИЕ 4: Timeout ===
-        if time_held > self.max_hold_time_sec:
-            return True, f"Timeout: {time_held:.0f}s (PnL: {pnl_pct:.3f}%)"
+        # 6. Максимальное время (10 минут вместо 1 часа)
+        if time_held > 600:
+            return True, f"Max hold: {time_held:.0f}s (PnL: {pnl_pct:.3f}%)"
         
         return False, ""
     

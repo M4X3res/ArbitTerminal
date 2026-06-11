@@ -32,7 +32,8 @@ class TradingEngine:
                 position_size_usd=position_size,
                 open_spread=opportunity.spread,
                 strategy_name=strategy_name,
-                open_time=datetime.now()
+                open_time=datetime.now(),
+                spread_trend_at_entry=getattr(opportunity, 'spread_trend', 'unknown')
             )
             self.open_positions[pair_id] = trade
             return True, pair_id
@@ -67,7 +68,8 @@ class TradingEngine:
                 position_size_usd=position_size,
                 open_spread=opportunity.spread,
                 strategy_name=strategy_name,
-                open_time=datetime.now()
+                open_time=datetime.now(),
+                spread_trend_at_entry=getattr(opportunity, 'spread_trend', 'unknown')
             )
             self.open_positions[pair_id] = trade
             

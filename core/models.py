@@ -40,6 +40,7 @@ class ArbitragePair:
     data_long: 'MarketData' = None
     data_short: 'MarketData' = None
     effective_spread: float = 0.0
+    spread_trend: str = 'unknown'  # 'expanding', 'stable', 'collapsing', 'unknown'
 
 
 @dataclass
@@ -63,3 +64,4 @@ class Trade:
     leverage: int = 5
     hs_spread_type: Optional[str] = None
     hs_max_hold_min: int = 60
+    spread_trend_at_entry: str = 'unknown'  # Тренд спреда в момент входа

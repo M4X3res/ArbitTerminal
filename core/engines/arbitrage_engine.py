@@ -19,6 +19,10 @@ class ArbitrageEngine:
         }
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.stats_lock = threading.Lock()  # Защита от race condition
+        
+        # ИСПРАВЛЕНИЕ #2: История спредов для детекции тренда
+        self.spread_trend_history: Dict[str, deque] = {}
+        self.TREND_WINDOW = 5  # Последние 5 измерений (500ms при 100ms интервале)
     
     def calculate_gross_spread(self, long_data: MarketData, short_data: MarketData) -> float:
         """Расчёт gross спреда БЕЗ учёта funding rate"""
@@ -39,6 +43,48 @@ class ArbitrageEngine:
         
         return effective
     
+    def _get_pair_key(self, ex_long: str, ex_short: str, symbol: str) -> str:
+        """Генерация ключа пары для истории спредов"""
+        return f"{ex_long}|{ex_short}|{symbol}"
+    
+    def _get_spread_trend(self, pair_key: str, current_spread: float) -> str:
+        """
+        Определяет тренд спреда: 'expanding', 'stable', 'collapsing'
+        
+        Expanding: спред растёт → хороший момент для входа
+        Stable: спред не меняется → нейтральный вход
+        Collapsing: спред падает → НЕ ВХОДИТЬ, возможность исчезает
+        """
+        if pair_key not in self.spread_trend_history:
+            self.spread_trend_history[pair_key] = deque(maxlen=self.TREND_WINDOW)
+        
+        history = self.spread_trend_history[pair_key]
+        history.append(current_spread)
+        
+        if len(history) < 3:
+            return 'unknown'
+        
+        # Линейная регрессия: знак наклона определяет тренд
+        values = list(history)
+        n = len(values)
+        mean_x = (n - 1) / 2
+        mean_y = sum(values) / n
+        
+        numerator = sum((i - mean_x) * (v - mean_y) for i, v in enumerate(values))
+        denominator = sum((i - mean_x) ** 2 for i in range(n))
+        
+        if denominator == 0:
+            return 'stable'
+        
+        slope = numerator / denominator  # % per iteration
+        
+        if slope > 0.05:   # Растёт более 0.05% за итерацию
+            return 'expanding'
+        elif slope < -0.05:  # Падает более 0.05% за итерацию
+            return 'collapsing'
+        else:
+            return 'stable'
+    
     def _check_pair_batch(self, pairs_batch, threshold):
         """Проверка батча пар (для параллелизма)"""
         opportunities = []
@@ -51,6 +97,13 @@ class ArbitrageEngine:
             # Стратегия 1
             spread1 = self.calculate_effective_spread(data_long, data_short)
             if spread1 > threshold:
+                pair_key = self._get_pair_key(ex_long, ex_short, symbol)
+                trend = self._get_spread_trend(pair_key, spread1)
+                
+                # ИСПРАВЛЕНИЕ #2: НЕ входим если спред уже схлопывается
+                if trend == 'collapsing':
+                    continue
+                
                 funding_diff_1 = data_short.funding_rate - data_long.funding_rate
                 opp = ArbitragePair(
                     exchange_long=ex_long, exchange_short=ex_short,
@@ -59,7 +112,8 @@ class ArbitrageEngine:
                     price_long=data_long.ask, price_short=data_short.bid,
                     timestamp=datetime.now(),
                     data_long=data_long, data_short=data_short,
-                    effective_spread=spread1 - abs(funding_diff_1) * 100
+                    effective_spread=spread1 - abs(funding_diff_1) * 100,
+                    spread_trend=trend
                 )
                 opportunities.append(opp)
                 with self.stats_lock:
@@ -72,6 +126,13 @@ class ArbitrageEngine:
             # Стратегия 2
             spread2 = self.calculate_effective_spread(data_short, data_long)
             if spread2 > threshold:
+                pair_key = self._get_pair_key(ex_short, ex_long, symbol)
+                trend = self._get_spread_trend(pair_key, spread2)
+                
+                # ИСПРАВЛЕНИЕ #2: НЕ входим если спред уже схлопывается
+                if trend == 'collapsing':
+                    continue
+                
                 funding_diff_2 = data_long.funding_rate - data_short.funding_rate
                 opp = ArbitragePair(
                     exchange_long=ex_short, exchange_short=ex_long,
@@ -80,7 +141,8 @@ class ArbitrageEngine:
                     price_long=data_short.ask, price_short=data_long.bid,
                     timestamp=datetime.now(),
                     data_long=data_short, data_short=data_long,
-                    effective_spread=spread2 - abs(funding_diff_2) * 100
+                    effective_spread=spread2 - abs(funding_diff_2) * 100,
+                    spread_trend=trend
                 )
                 opportunities.append(opp)
                 with self.stats_lock:

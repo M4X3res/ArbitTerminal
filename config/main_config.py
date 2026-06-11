@@ -41,14 +41,20 @@ MIN_SPREAD_PERSISTENCE = 4  # Спред должен держаться 4 ит�
 AGGRESSIVE_MODE = False
 AGGRESSIVE_MAX_SPREAD = 5.0  # Если True, макс спред 5% вместо 3%
 
-# === СТРАТЕГИЯ ЗАКРЫТИЯ (REST-оптимизировано) ===
-STRATEGY_TYPE = 'rest_optimized'  # 'amplitude', 'collapse', или 'rest_optimized'
+# === СТРАТЕГИЯ ЗАКРЫТИЯ (SpreadCollapse для больших спредов) ===
+STRATEGY_TYPE = 'collapse'  # Изменено: было 'rest_optimized' (WR=27%), теперь 'collapse'
 
-# REST Optimized Strategy (рекомендуется для REST торговли)
-REST_TAKE_PROFIT_PCT = 0.4    # Фиксированный TP: 0.4% (с 5x = 2% ROI)
-REST_STOP_LOSS_PCT = 0.5      # Фиксированный SL: 0.5% (с 5x = 2.5% убыток от margin)
-REST_MAX_HOLD_TIME = 180      # 3 минуты максимум
-REST_TRAILING_ACTIVATION = 0.5  # Трейлинг после 0.5% прибыли
+# SpreadCollapse Strategy (для спредов 1.5-5%)
+COLLAPSE_THRESHOLD = 0.3       # Закрываем когда спред сузился до 0.3%
+MIN_PROFIT_PCT = 0.25          # Минимальная прибыль для закрытия
+MAX_HOLD_TIME_COLLAPSE = 600   # 10 минут (было 3600 для старой стратегии)
+COLLAPSE_STOP_LOSS_EXPANSION = 1.5  # Стоп при расширении спреда на 1.5%
+
+# REST Optimized Strategy (устаревшая, оставлена для fallback)
+REST_TAKE_PROFIT_PCT = 0.4
+REST_STOP_LOSS_PCT = 0.5
+REST_MAX_HOLD_TIME = 180
+REST_TRAILING_ACTIVATION = 0.5
 # Amplitude Strategy
 AMPLITUDE_WINDOW = 50
 AMPLITUDE_THRESHOLD = 0.7
